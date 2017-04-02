@@ -1,3 +1,3 @@
 [submodule "noodles"]
 	path = noodles
-	url = git.ezscratch.com:/NoodlesFramework.git
+	url = https://github.com/SandStormHoldings/NoodlesFramework
