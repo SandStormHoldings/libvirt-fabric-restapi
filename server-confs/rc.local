@@ -1,0 +1,2 @@
+#!/bin/sh -e
+%(floating_ips)s

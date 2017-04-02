@@ -1,0 +1,3 @@
+max-bandwidth: 50M
+line-display: one-line-both
+sort: 40s

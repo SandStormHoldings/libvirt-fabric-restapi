@@ -1,0 +1,24 @@
+* doing maintenance on an image
+** let's mount it
+1. losetup -f ubuntu-12.04-large.img 
+2. kpartx -a /dev/loop0
+3. mkdir /mnt/ubuntu-12.04-large
+4. mount /dev/mapper/ubuntu-root ubuntu-12.04-large/
+** let's upgrade it
+1. chroot /mnt/ubuntu-12.04-large /bin/bash
+2. mkdir /run/resolvconf
+3. echo 'nameserver 8.8.8.8' > /run/resolvconf/resolv.conf
+4. apt-get update && apt-get upgrade
+** let's change passwords & keys
+1. passwd username
+2. echo 'ssh-rsa ... user@machine' > /root/.ssh/authorized_keys
+** wrap it up
+1. ^D
+2. umount /mnt/ubuntu-12.04-large
+3. losteup -d /dev/loop0
+* figuring out how many public ips are currently assigned to virt nodes on each host
+1. fab -R kvm list > /tmp/l.org
+2. cleanup /tmp/l.org to have the following header: 
+3. | host        | node_id | node_name                          | node_state |          node_mac | node_virt_ip |       public_ip | 
+4. cat /tmp/l.org  | /tmp/tsorg.py list | termsql -m tabs -0 -1 \
+'select host,sum(pubs) from (select distinct host,0 pubs from tbl union select host,count(distinct public_ip) pubs from tbl where public_ip is not null group by host) foo group by host order by pubs'

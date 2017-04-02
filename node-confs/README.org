@@ -1,0 +1,3 @@
+- restapi.conf goes into /etc/init/
+- 30-restapi.conf goes into /etc/rsyslog.d/
+  

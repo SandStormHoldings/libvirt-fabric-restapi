@@ -1,0 +1,20 @@
+*.pyc
+venv/*
+*~
+tmp/*
+bin/*
+include/*
+lib/python2.7/*
+local/*
+selenium/*
+conf_repo*
+
+#home directory stuff 
+.bash_history
+.bash_logout
+.bashrc
+.cache
+.lesshst
+.pip
+.profile
+.git-old

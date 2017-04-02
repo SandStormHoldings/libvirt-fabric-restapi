@@ -1,0 +1,13 @@
+* prequisites
+1. apt-get install git python-dev python-virtualenv pigz zile
+* restapi install
+1. adduser restapi
+2. install ssh keys
+3. clone into /home/restapi
+4. virtualenv ~/ && . bin/activate
+5. had to implement the following patch [[http://termbin.com/8yia][in noodles/]] (change the WebSocketHandler import to relative (..))
+6. git submodule update --init
+7. pip install -r requirements.txt
+8. create auth.json
+9. cp /home/restapi/node-confs/30-restapi.conf /etc/rsyslog.d/ && service rsyslog restart #orderly logging
+10. sudo cp /home/restapi/node-confs/restapi.conf /etc/init && service restapi start #create the init file

@@ -1,0 +1,5 @@
+Fabric3
+PrettyTable
+paste
+-r noodles/requirements.txt
+future

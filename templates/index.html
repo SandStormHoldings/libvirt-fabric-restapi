@@ -1,0 +1,44 @@
+<ul>
+<li><a href="/hosts">hosts</a></li>
+<li><a href="/nodes">nodes</a></li>
+<li><a href="/groups">groups</a></li>
+<li><a href="/images">images</a></li>
+<li><a href="/dns">DNS</a></li>
+</ul>
+
+<h5>usage examples</h5><pre>
+
+you could, to make things easy, create the following helpder script (restapi.sh):
+#!/bin/bash
+AUTHSTRING="${"$"}(< .restapi.auth)" ; curl --digest "${"$"}"{@:2}" 'http://'$AUTHSTRING'@hostname:8092'$1
+
+this script loads your credentials from a file called .restapi.auth, and provides a comfortable environment to execute curl from. then, the following are easy:
+
+see what images we've got
+$ ./restapi.sh /images
+
+see what hosts are active
+$ ./restapi.sh /hosts
+
+what node groups you've got access to
+$ ./restapi.sh /groups
+
+create a new machine from template ubuntu-12.04-template.img, belonging to group "jenkins", under host hyperv1:
+$ ./restapi.sh /nodes/hyperv1 -X POST -d 'name=gagarin&image=ubuntu-12.04-template.img&group=jenkins'
+
+turn a machine on
+$ ./restapi.sh /nodes/hyperv1/virtmachine' -X PUT -d 'state=running'
+
+turn a machine off
+$ ./restapi.sh /nodes/hyperv1/virtmachine -X PUT -d 'state=shut%20off'
+
+delete a machine
+$ ./restapi.sh /nodes/hyperv1/virtmachine -X DELETE
+
+migrate a machine from ss2 -> ss1
+$ ./restapi.sh /nodes/hyperv1/production-lolzlocks2 -d 'source_host=hyperv2 -X POST
+
+add your public key
+$ ./restapi.sh '/nodes/hyperv1/preprod2-vasja23/pubkey' -X POST -d 'pubkey='$(cat ~/.ssh/id_rsa.pub | python -c 'import sys ; from urllib import quote ; print "\n".join([quote(ln) for ln in sys.stdin])')
+
+</pre>

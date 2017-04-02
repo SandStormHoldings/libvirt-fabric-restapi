@@ -1,0 +1,5 @@
+{"users":
+ {"user1":""},
+ "groups":
+ {"group1":["user1","user2","user3"]}
+}
