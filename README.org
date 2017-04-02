@@ -1,5 +1,5 @@
 * purpose
-Let's say you have a rack of boxes, which you'd like to use as hypervisors. 
+you have a rack of boxes, which you'd like to use as virtual machine hypervisors. you don't want the baggage of openstack, and you're comfortable with the console. nevertheless, you do need to delegate some of the functionality to your users.
 ** your primary use cases involve
 - instantiation of machines
 - resizing them, migrating
