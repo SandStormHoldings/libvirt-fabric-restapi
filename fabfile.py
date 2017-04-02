@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-
+from __future__ import print_function
 """
 fabric commands module which are used by the REST API, but can also be used directly.
 """
 __author__='Guy Romm'
 
-from __future__ import print_function
+
 from future import standard_library
 standard_library.install_aliases()
 from builtins import str
@@ -1330,7 +1330,7 @@ def install_staticwebserver(authorized_keys_fn=None,
     upload_template('node-confs/static/static.httpd.conf',
                     '/etc/apache2/sites-available/static.httpd.conf',
                     {'vhost':vhost,
-                     'digest realm':DIGEST_REALM
+                     'digest realm':DIGEST_REALM,
                      'user':user})
     run('a2ensite static.httpd.conf')
     run('chown -R {user}:{user} /home/{user}'.format(user=user))

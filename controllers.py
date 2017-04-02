@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from __future__ import print_function
 '''
 REST API controllers file
 '''
 __author__='Guy Romm'
 
-from __future__ import print_function
 from future import standard_library
 standard_library.install_aliases()
 from builtins import str

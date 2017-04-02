@@ -1,10 +1,11 @@
 #!/usr/bin/env python
+from __future__ import print_function
 """
 tabular display of the running hypervisors in the console.
 """
 __author__='Guy Romm'
 
-from __future__ import print_function
+
 from builtins import str
 from builtins import object
 try:
