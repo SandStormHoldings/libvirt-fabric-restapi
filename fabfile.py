@@ -971,7 +971,7 @@ def append_openvpn(client_name,email,comment):
     return apnd
 
 def client_openvpn(node_name, client_name, inlined=True, email=None):
-    ourhost = list(al=True, display=False)[node_name]
+    ourhost = _lst(al=True, display=False)[node_name]
     if ourhost['host'] != env.host_string:
         return
     with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % ourhost['virt_ip']):
@@ -982,7 +982,7 @@ def client_openvpn_exec(client_name,inlined,email):
         with nested(prefix("source vars"), shell_env(KEY_NAME=client_name, KEY_CN=client_name)):
             op = run('./pkitool %s' % client_name)
             assert 'failed to update database' not in op
-        run('mkdir keys/%s' % client_name)
+        run('mkdir -p keys/%s' % client_name)
         with cd('keys/%s' % client_name):
             run('cp ../ca.crt ../dh1024.pem ../ta.key ../%(client)s.crt ../%(client)s.key .' % {'client':client_name})
             run('cp /etc/openvpn/client.example client.conf')
@@ -1013,7 +1013,7 @@ def client_openvpn_exec(client_name,inlined,email):
                           'sender': OVPN_KEY_SENDER,
                           'mail_login':MAIL_LOGIN,
                           'mail_password':MAIL_PASSWORD,
-                          'mail_host':MAIL_HOST,
+                          'mail_host':MAIL_SERVER,
                           'mail_port':MAIL_PORT,
                           'tgzfn': tgzfn,
                           'apnd':apnd,
