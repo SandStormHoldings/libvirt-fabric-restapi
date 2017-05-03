@@ -26,6 +26,8 @@ $ ./restapi.sh /groups
 create a new machine from template ubuntu-12.04-template.img, belonging to group "jenkins", under host hyperv1:
 $ ./restapi.sh /nodes/hyperv1 -X POST -d 'name=gagarin&image=ubuntu-12.04-template.img&group=jenkins'
 
+enlarge a machine's disk
+$ ./restapi.sh /nodes/hyperv1/virtmachine/disk -X PUT -d 'size=10G'
 turn a machine on
 $ ./restapi.sh /nodes/hyperv1/virtmachine' -X PUT -d 'state=running'
 

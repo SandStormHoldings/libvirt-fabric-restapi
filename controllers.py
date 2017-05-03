@@ -252,7 +252,7 @@ def new_node(request,host=None):
     imgn = args.get('image')
     imgkeys=list(IMAGES.keys())
     if imgn not in imgkeys: raise Exception("%s not in %s"%(imgn,imgkeys))
-    assert args.get('group') in mygroups,"group %s is not in my allowed groups"%args.get('group')
+    assert args.get('group') in mygroups,"group %s is not in my allowed groups %s"%(args.get('group'),mygroups)
     assert args.get('host') in list(HOSTS.keys()),"host %s not found in %s"%(args.get('host'),list(HOSTS.keys()))
     try:
         res = execute(create_node,
