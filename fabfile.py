@@ -35,7 +35,7 @@ from config import (HOSTS, VLAN_GATEWAYS, VLAN_RANGES, FLOATING_IPS,IPV6,DEFAULT
                     ovpn_client_netmask, DIGEST_REALM, SECRET_KEY, IMAGES, LOWERED_PRIVILEGES, snmpd_network, OVPN_KEY_SENDER, JUMPHOST_EXTERNAL_IP, DEFAULT_SEARCH, DNS_HOST, OVPN_KEYDIR,FORWARDED_PORTS,
                     SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX
 )
-from config_noodles import MAIL_LOGIN,MAIL_PASSWORD,MAIL_SERVER,MAIL_PORT
+from config import MAIL_LOGIN,MAIL_PASSWORD,MAIL_SERVER,MAIL_PORT
 env.passwords=ssh_passwords
 
 #make sure that key config settings are assigned
@@ -942,7 +942,7 @@ def list_openvpn():
     dirsp = dict([(d.split('/')[-1],d) for d in dirs])
     defsp = dict([(k[0],k[1:]) for k in defs])
     keys = set(k1+k2)
-    print(len(k1),' keys in defs; ',len(k2),'are defined in dirs ; ',len(set(k1).intersection(set(k2))),'are common to them both; ')
+    print(len(k1),' keys in defs; ',len(k2),'are defined in dirs ; ',len(set(k1).intersection(set(k2))),'are in common.')
     print('the following keys are present in openvpnusers.txt, but not in /etc/openvpn/easy-rsa/keys:',set(k1).difference(set(k2)))
     print('the other way:',set(k2).difference(set(k1)))
     rt={}
@@ -1426,3 +1426,4 @@ def getmem(node):
     mem = run("""virsh dumpxml %s | xmlstarlet sel -t -m '//memory[1]' -v . -n"""%node)
     curmem = run("""virsh dumpxml %s | xmlstarlet sel -t -m '//currentMemory[1]' -v . -n"""%node)
     return {'memory':mem,'currentMemory':curmem}
+
