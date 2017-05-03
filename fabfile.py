@@ -1426,4 +1426,3 @@ def getmem(node):
     mem = run("""virsh dumpxml %s | xmlstarlet sel -t -m '//memory[1]' -v . -n"""%node)
     curmem = run("""virsh dumpxml %s | xmlstarlet sel -t -m '//currentMemory[1]' -v . -n"""%node)
     return {'memory':mem,'currentMemory':curmem}
-

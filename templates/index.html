@@ -36,7 +36,7 @@ delete a machine
 $ ./restapi.sh /nodes/hyperv1/virtmachine -X DELETE
 
 migrate a machine from ss2 -> ss1
-$ ./restapi.sh /nodes/hyperv1/production-lolzlocks2 -d 'source_host=hyperv2 -X POST
+$ ./restapi.sh /nodes/hyperv1/production-lolzlocks2 -d 'source_host=hyperv2' -X POST
 
 add your public key
 $ ./restapi.sh '/nodes/hyperv1/preprod2-vasja23/pubkey' -X POST -d 'pubkey='$(cat ~/.ssh/id_rsa.pub | python -c 'import sys ; from urllib import quote ; print "\n".join([quote(ln) for ln in sys.stdin])')

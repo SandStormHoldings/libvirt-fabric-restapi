@@ -380,7 +380,8 @@ def memory(request,node,host):
     r = request
     pre = pre_from_req(r)
     user = getuser(r)
-    if not pre.search(OVPN_HOST): return Error403("no permissions to access %s"%OVPN_HOST)
+    print('pre=%s'%pre)
+    if not pre.search(node): return Error403("no permissions to access %s , not in %s"%(OVPN_HOST,usergroups(user)))
 
     rt = execute(getmem,node,host=host)[host]
     return XResponse({'result':rt})
@@ -391,7 +392,7 @@ def memory_update(request,node,host):
     r = request
     pre = pre_from_req(r)
     user = getuser(r)
-    if not pre.search(OVPN_HOST): return Error403("no permissions to access %s"%OVPN_HOST)
+    if not pre.search(node): return Error403("no permissions to access %s"%OVPN_HOST)
 
     prev = execute(getmem,node,host=host)[host]
 

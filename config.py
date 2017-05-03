@@ -9,7 +9,7 @@ env.use_ssh_config = True
 HYPERVISOR_HOSTNAME_PREFIX='hyperv'
 
 # override this to include specific hypervisor hosts in your setup 
-env.roledefs['kvm'] = [] 
+env.roledefs['kvm'] = []
 
 main_network = None
 
