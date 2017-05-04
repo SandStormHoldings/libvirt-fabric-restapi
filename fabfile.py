@@ -933,6 +933,60 @@ auto eth0:%(cnt)s
     with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % ourhost['virt_ip']):
         run('service openvpn restart')
 
+def openvpn_status():
+    op = run('cat /etc/openvpn/openvpn-status.log')
+    rows = [r.strip().split(',') for r in op.split('\n')]
+    head = rows[0]
+    upd = rows[1]
+    clients_head = rows[2][0:]
+    clients = rows[3:]
+    clients_d={}
+    for c in clients:
+        if c[0]=='ROUTING TABLE': break
+        try:
+            cd = dict([(clients_head[i],c[i]) for i in range(len(clients_head))])
+            assert cd['Common Name'] not in clients_d
+            clients_d[cd['Common Name']]=cd
+        except IndexError:
+            #print('cannot parse',c,'with',clients_head)
+            raise
+    rt= {'head':head,
+         'upd':upd[1],
+         'clients':clients_d}
+
+    return rt
+
+def openvpn_ipp():
+    op = run('cat /etc/openvpn/ipp.txt')
+    hd=['name','internal_ip']
+    rows = [r.strip().split(',') for r in op.split('\n')]
+    rows_d={}
+    
+    for k,v in rows:
+        if k not in rows_d: rows_d[k]=[]
+        if v not in rows_d[k]: rows_d[k].append(v)
+
+    return rows_d
+
+def openvpn_all():
+    ips = openvpn_ipp()
+    status = openvpn_status()
+    lst = list_openvpn()
+    lst['missing_keys']={}
+
+    mp = {'ips':ips.items(),
+          'status':status['clients'].items()}
+    for mk,mv in mp.items():
+        for k,v in mv:
+            if k in lst['keys']: 
+                lst['keys'][k][mk]=v
+            elif k in lst['missing_keys']:
+                lst['missing_keys'][k][mk]=v
+            else:
+                lst['missing_keys'][k]={mk:v}
+
+    return lst
+
 def list_openvpn():
     defs = [[r.strip() for r in i.split(' ')] for i in open('conf_repo/openvpnusers.txt','r').read().split('\n') if i!='' and not i.startswith('#')]
     ovpndirs = run('find /etc/openvpn/easy-rsa/keys -maxdepth 1  -type d')
@@ -942,9 +996,14 @@ def list_openvpn():
     dirsp = dict([(d.split('/')[-1],d) for d in dirs])
     defsp = dict([(k[0],k[1:]) for k in defs])
     keys = set(k1+k2)
-    print(len(k1),' keys in defs; ',len(k2),'are defined in dirs ; ',len(set(k1).intersection(set(k2))),'are in common.')
-    print('the following keys are present in openvpnusers.txt, but not in /etc/openvpn/easy-rsa/keys:',set(k1).difference(set(k2)))
-    print('the other way:',set(k2).difference(set(k1)))
+    sets={}
+    sets['in_both'] = set(k1).intersection(set(k2))
+    sets['users_not_keys'] = set(k1).difference(set(k2))
+    sets['keys_not_users'] = set(k2).difference(set(k1))
+    for k in sets:
+        for i in sets[k]:
+            print(k,i)
+
     rt={}
     for k in keys:
         rt[k]={'id':k,
@@ -952,7 +1011,8 @@ def list_openvpn():
                'email':defsp.get(k) and defsp.get(k)[0],
                'comment':defsp.get(k) and len(defsp.get(k))>1 and defsp.get(k)[1],
                }
-    return rt
+    return {'sets':sets,
+            'keys':rt}
 def append_openvpn(client_name,email,comment):
     un = client_name ;em = email
     dt = datetime.datetime.now().isoformat()

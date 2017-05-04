@@ -43,5 +43,8 @@ def get_map():
     m.connect('/nodes/{host}/{node}/pubkey',controller=cn,action='host_auth_add',conditions=dict(method=['POST']))
 
     m.connect('/openvpn/',controller=cn,action='openvpn_list',conditions=dict(method=['GET']))
+    m.connect('/openvpn/all',controller=cn,action='openvpn_all',conditions=dict(method=['GET']))
+    m.connect('/openvpn/status',controller=cn,action='openvpn_status',conditions=dict(method=['GET']))
+    m.connect('/openvpn/ips',controller=cn,action='openvpn_ips',conditions=dict(method=['GET']))
     m.connect('/openvpn/',controller=cn,action='openvpn_add',conditions=dict(method=['POST']))
     return m

@@ -19,7 +19,8 @@ from fabric.api import *
 from fabfile import (_lst,create_node,destroy,reboot,undefine,start,migrate,
                      get_dns, add_dns, del_dns, enlarge_lvm, get_tmux_sessions,
                      node_network_info, kill_tmux_session,node_auth,list_openvpn,
-                     append_openvpn, getmem)
+                     openvpn_ipp,openvpn_all as openvpn_all_worker,
+                     openvpn_status as openvpn_status_worker, append_openvpn, getmem)
 from config import AUTH_DB_FILE,IMAGES,DEFAULT_RAM,DEFAULT_VCPU,HOSTS,DNS_HOST,OVPN_HOST
 from noodles.templates import render_to
 from noodles.digest.decorators import httpdigest as httpdigest
@@ -178,6 +179,20 @@ def host_auth_add(request,host,node):
     res = execute(node_auth,pubkey,host=node_ip)[node_ip]
     return XResponse({'result':res,'host':host,'node':node,'node_ip':node_ip})
 
+@lck
+@httpdigest
+def openvpn_all(request):
+    pre = pre_from_req(request)
+    if not pre.search(OVPN_HOST): return Error403("no permissions to access %s"%OVPN_HOST)
+    return XResponse({'result':execute(openvpn_all_worker,host=OVPN_HOST)})
+
+@lck
+@httpdigest
+def openvpn_status(request):
+    pre = pre_from_req(request)
+    if not pre.search(OVPN_HOST): return Error403("no permissions to access %s"%OVPN_HOST)
+    return XResponse({'result':execute(openvpn_status_worker,host=OVPN_HOST)})
+
 @lck 
 @httpdigest
 def openvpn_list(request):
@@ -185,6 +200,13 @@ def openvpn_list(request):
     if not pre.search(OVPN_HOST): return Error403("no permissions to access %s"%OVPN_HOST)
     return XResponse({'result':execute(list_openvpn,host=OVPN_HOST)})
 
+@lck
+@httpdigest
+def openvpn_ips(request):
+    pre = pre_from_req(request)
+    if not pre.search(OVPN_HOST): return Error403("no permissions to access %s"%OVPN_HOST)
+    return XResponse({'result':execute(openvpn_ipp,host=OVPN_HOST)})
+    
 @lck 
 @httpdigest
 def openvpn_add(request):
