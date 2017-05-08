@@ -997,9 +997,10 @@ def list_openvpn():
     defsp = dict([(k[0],k[1:]) for k in defs])
     keys = set(k1+k2)
     sets={}
-    sets['in_both'] = set(k1).intersection(set(k2))
-    sets['users_not_keys'] = set(k1).difference(set(k2))
-    sets['keys_not_users'] = set(k2).difference(set(k1))
+    # converted back to lists for json
+    sets['in_both'] = list(set(k1).intersection(set(k2)))
+    sets['users_not_keys'] = list(set(k1).difference(set(k2)))
+    sets['keys_not_users'] = list(set(k2).difference(set(k1)))
     for k in sets:
         for i in sets[k]:
             print(k,i)
