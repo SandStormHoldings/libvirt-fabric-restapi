@@ -677,7 +677,7 @@ def virt_nodes():
     return ips
 
 @runs_once
-def list(al=False, display=True,network_info=True,memory=False):
+def list_(al=False, display=True,network_info=True,memory=False):
     rt = _lst(al, display=display,network_info=network_info,memory=memory)
  
 
@@ -851,7 +851,7 @@ def host_reboot():
 
 
 def setup_openvpn(node_name):
-    ourhost = list(al=True, display=False)[node_name]
+    ourhost = list_(al=True, display=False)[node_name]
     print(ourhost)
     if ourhost['host'] != env.host_string:
         return
@@ -945,8 +945,10 @@ def openvpn_status():
         if c[0]=='ROUTING TABLE': break
         try:
             cd = dict([(clients_head[i],c[i]) for i in range(len(clients_head))])
-            assert cd['Common Name'] not in clients_d
-            clients_d[cd['Common Name']]=cd
+            if cd['Common Name'] not in clients_d:
+                clients_d[cd['Common Name']]=[]
+                #,"common name %s is in %s"%(cd['Common Name'],clients_d)
+            clients_d[cd['Common Name']].append(cd)
         except IndexError:
             #print('cannot parse',c,'with',clients_head)
             raise
