@@ -451,7 +451,7 @@ def undefine(node, target, del_image=True):
 def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False):
     #find out where image_name resides
     if not src_host or not mac_addr:
-        alst = _lst(all=True)
+        alst = _lst(al=True)
         rt = alst[image_name]
         assert rt,"could not find %s,\n%s" % (image_name, rt)
         src_host = rt['host']
