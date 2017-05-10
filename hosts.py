@@ -73,6 +73,9 @@ def parse_output(hop,h):
 
 if __name__=='__main__':
     #set_settings()
+    if 'noquery' in sys.argv[1:]:
+        print("\n".join(env.roledefs['kvm']))
+        sys.exit(0)
     instance = ParallelCommands(hosts=len(sys.argv)>1 and [sys.argv[1]] or env.roledefs['kvm'], command="; ".join(commands))
     output = instance.capture()
     hres={}

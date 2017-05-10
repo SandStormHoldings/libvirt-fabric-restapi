@@ -3,7 +3,10 @@ import re
 import logging
 from fabric.api import env
 # we use an ssh config file called ssh_config by default.
-env.ssh_config_path='ssh_config'
+import os
+
+env.ssh_config_path=os.path.join(os.path.dirname(__file__),'ssh_config')
+assert os.path.exists(env.ssh_config_path)
 env.use_ssh_config = True
 
 HYPERVISOR_HOSTNAME_PREFIX='hyperv'
@@ -16,7 +19,7 @@ main_network = None
 # regular expressions to facilitate parsing the ssh config file
 hostre = re.compile('Host (.+)')
 ipre = re.compile('HostName (.+)')
-confcont = open('ssh_config','r').read()
+confcont = open(env.ssh_config_path,'r').read()
 hosts = ipre.findall(confcont)
 ips = hostre.findall(confcont)
 # parsed dictionary from ssh config includes hosts and their ips 

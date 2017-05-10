@@ -1472,18 +1472,24 @@ def install_snmpd(network=snmpd_network):
     install_ipt(myipt)
 
 # fab -R kvm authorized_keys_get
-def authorized_keys_get(usehostname=False):
-    run("""find /root/ /home/ -maxdepth 3 -iname 'authorized_keys*' ! -iname '*.sh' ! -iname '*py' ! -iname '*~' -exec grep -H "" {} \; | sort > /tmp/authkeys.txt""")
+def authorized_keys_get(tdir='authorized_keys',usehostname=False):
+    assert os.path.exists(tdir)
+    lckf = os.path.join(tdir,'locks',env.host_string+'.lock')
+    lckd = os.path.join(tdir,'locks')
+    local('mkdir -p %s'%lckd)
+    local('touch %s'%lckf)
+
+    run("""find $(cut -f6 -d ':' /etc/passwd |sort |uniq | tr '\n' ' ') -maxdepth 3 -iname 'authorized_keys*' ! -iname '*.sh' ! -iname '*py' ! -iname '*~' -exec egrep -v -H "^$" {} \; | sort | uniq > /tmp/authkeys.txt""")
     with settings(hide('warnings', 'running', 'stdout', 'stderr')):
         if usehostname:
             hn = run('hostname').strip()
-            tgtfn = 'authorized_keys/%s.txt'%hn
+            tgtfn = os.path.join(tdir,'%s.pub'%hn)
         else:
-            tgtfn = 'authorized_keys/%s.txt'%env.host_string
+            tgtfn = os.path.join(tdir,'%s.pub'%env.host_string)
         get('/tmp/authkeys.txt',tgtfn)
         print('-> %s'%tgtfn)
     run("""rm /tmp/authkeys.txt""")
-
+    local('rm %s'%lckf)
 
 def getmem(node):
     mem = run("""virsh dumpxml %s | xmlstarlet sel -t -m '//memory[1]' -v . -n"""%node)
