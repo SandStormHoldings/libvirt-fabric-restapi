@@ -1479,7 +1479,7 @@ def authorized_keys_get(tdir='authorized_keys',usehostname=False):
     local('mkdir -p %s'%lckd)
     local('touch %s'%lckf)
 
-    run("""find $(cut -f6 -d ':' /etc/passwd |sort |uniq | tr '\n' ' ') -maxdepth 3 -iname 'authorized_keys*' ! -iname '*.sh' ! -iname '*py' ! -iname '*~' -exec egrep -v -H "^$" {} \; | sort | uniq > /tmp/authkeys.txt""")
+    run("""find $(cut -f6 -d ':' /etc/passwd |sort |uniq | tr '\n' ' ') -maxdepth 3 -iname 'authorized_keys*' ! -iname '*.txt' ! -iname '*.bck' ! -iname '*.diff' ! -iname '*.sh' ! -iname '*py' ! -iname '*~' -exec egrep -v -H "^$" {} \; | sort | uniq > /tmp/authkeys.txt""")
     with settings(hide('warnings', 'running', 'stdout', 'stderr')):
         if usehostname:
             hn = run('hostname').strip()
