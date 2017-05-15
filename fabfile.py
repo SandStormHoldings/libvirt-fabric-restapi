@@ -24,6 +24,7 @@ from collections import defaultdict
 from fabric.api import *
 env.use_ssh_config = True
 env.reject_unknown_hosts = False
+env.disable_known_hosts = False
 
 from fabric.contrib.files import exists, contains,append, comment, upload_template
 from fabric.context_managers import nested, shell_env
