@@ -368,6 +368,10 @@ def start(node=None):
         return rt
 
 
+def resume(node):
+    rt=run('virsh resume %s'%node)
+    return rt
+
 def reboot(node):
     rt=run('virsh reboot %s'%node)
     return rt

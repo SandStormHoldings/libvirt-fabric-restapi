@@ -36,6 +36,7 @@ def C(attr):
 
 
 def usergroups(username):
+    #print('going through groups ',C('groups').items(),' for user ',username)
     return [gn for gn,u in list(C('groups').items()) if username in u]
 
 def l(msg):
@@ -227,7 +228,8 @@ def openvpn_add(request):
 @httpdigest
 def update_node(request,host,node):
     pre = pre_from_req(request)
-    assert pre.search(node),"no permissions to access %s"%node
+    ug = usergroups(getuser(request))
+    assert pre.search(node),"no permissions (%s) to access %s"%(ug,node)
     #running,shut off,reboot
     state = request.params.get('state')
     try:
@@ -237,6 +239,8 @@ def update_node(request,host,node):
             rt=execute_cli('reboot',node=node,host=host)
         elif state=='running':
             rt=execute_cli('start',node=node,host=host)
+        elif state=='resumed':
+            rt=execute_cli('resume',node=node,host=host)
         else:
             raise Exception('unknown command')
         return XResponse({'result':rt})
