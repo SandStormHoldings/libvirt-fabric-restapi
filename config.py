@@ -1,9 +1,10 @@
+#!/usr/bin/env python
 from builtins import zip
 import re
 import logging
 from fabric.api import env
 # we use an ssh config file called ssh_config by default.
-import os
+import os,sys
 
 env.ssh_config_path=os.path.join(os.path.dirname(__file__),'ssh_config')
 assert os.path.exists(env.ssh_config_path)
@@ -73,6 +74,8 @@ SSH_KEYNAMES=[SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME]
 # this is the default format for virtual disk templates from which we instantiate hosts. qcow2 can be used just as well
 IMAGE_FORMAT='raw'
 
+ALERTS_RECIPIENT=None
+ALERTS_RECIPIENT_NAME=None
 # import the local overrides of the defaults above.
 from config_noodles import *
 try:
@@ -92,4 +95,5 @@ for ip in [ip for ip in ips if HOST_PREFIX in ip]:
     VLAN_GATEWAYS[ip]=gate(i)
     VLAN_RANGES[ip]=netrange(i,i)
 
-
+if __name__=='__main__' and len(sys.argv)>1:
+    print(locals()[sys.argv[1]])
