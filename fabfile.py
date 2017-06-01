@@ -231,8 +231,9 @@ def setup_network(snmpd_network=snmpd_network):
              'vlan_bcast': main_network+'.0.255',
              'my_floating_ips':apnd,
              'extra':'',}
+
     with cd('/etc/network'):
-        put('server-confs/interfaces','interfaces.install',varss)
+        upload_template('server-confs/interfaces','interfaces.install',varss)
         with settings(warn_only=True):
             if run('diff /etc/network/interfaces /etc/network/interfaces.install'):
                 run('cp /etc/network/interfaces /etc/network/interfaces.backup')
@@ -265,7 +266,6 @@ def setup_dhcpd():
                                   '16, '+\
                                   ', '.join(ovpn_client_network.split('.')[0:2])+', '+\
                                   ', '.join(ovpn_internal_addr.split('.'))
-        
         base_vars = {
             'vlan_gw': vlan_gw,
             'dhcpd_domain_name':DHCPD_DOMAIN_NAME,
