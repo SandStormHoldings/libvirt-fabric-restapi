@@ -26,7 +26,7 @@ env.use_ssh_config = True
 env.reject_unknown_hosts = False
 env.disable_known_hosts = False
 
-from fabric.contrib.files import exists, contains,append, comment, upload_template
+from fabric.contrib.files import exists, contains,append, comment, upload_template, sed
 from fabric.context_managers import nested, shell_env
 import fabric.contrib.files
 
@@ -1500,3 +1500,17 @@ def getmem(node):
     mem = run("""virsh dumpxml %s | xmlstarlet sel -t -m '//memory[1]' -v . -n"""%node)
     curmem = run("""virsh dumpxml %s | xmlstarlet sel -t -m '//currentMemory[1]' -v . -n"""%node)
     return {'memory':mem,'currentMemory':curmem}
+
+def authorized_keys_add(dstfn,pubkeyfn):
+    sfn = pubkeyfn #os.path.join(OVPN_KEYDIR,pubkeyfn)
+    assert os.path.exists(sfn),"%s does not exist"%sfn
+    cont = open(sfn,'r').read().strip()
+    assert exists(dstfn)
+    append(dstfn,cont)
+
+def authorized_keys_del(dstfn,pubkeyfn):
+    sfn = pubkeyfn #os.path.join(OVPN_KEYDIR,pubkeyfn)
+    assert os.path.exists(sfn),"%s does not exist"%sfn
+    cont = open(sfn,'r').read().strip().replace('+','\+')
+    assert exists(dstfn)
+    sed(dstfn,cont,'',backup='')
