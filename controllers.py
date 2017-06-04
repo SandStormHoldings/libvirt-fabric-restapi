@@ -217,6 +217,7 @@ def openvpn_add(request):
     if not pre.search(OVPN_HOST): return Error403("no permissions to access %s"%OVPN_HOST)
 
     un = r.params.get('key')
+    assert len(un),"key parameter missing"
     em = r.params.get('email')
     assert em and '@' in em,"%s not a valid email"%em
     comment = r.params.get('comment')

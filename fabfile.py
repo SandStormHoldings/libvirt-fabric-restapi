@@ -1047,8 +1047,19 @@ def client_openvpn(node_name, client_name, inlined=True, email=None):
 
 def client_openvpn_exec(client_name,inlined,email):
     with cd('/etc/openvpn/easy-rsa'):
-        with nested(prefix("source vars"), shell_env(KEY_NAME=client_name, KEY_CN=client_name)):
-            op = run('./pkitool %s' % client_name)
+        with nested(prefix("source vars"%{'cn':client_name})
+                    #, shell_env(KEY_NAME=client_name,KEY_CN=client_name,SOME_VAR='some_value')
+                    ):
+            from config import HOST_PREFIX as hpf
+            envs={'org':hpf,
+                  'email':email,
+                  'cn':client_name,
+                  'name':client_name,
+                  'ou':client_name}
+            pref = "; ".join(['export KEY_'+k.upper()+'='+v for k,v in envs.items()])+'; '
+            gencmd = pref+'./pkitool %s' % client_name
+            print(gencmd)
+            op = run(gencmd)
             assert 'failed to update database' not in op
         run('mkdir -p keys/%s' % client_name)
         with cd('keys/%s' % client_name):
