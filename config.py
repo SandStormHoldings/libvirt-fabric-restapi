@@ -18,11 +18,11 @@ env.roledefs['kvm'] = []
 main_network = None
 
 # regular expressions to facilitate parsing the ssh config file
-hostre = re.compile('Host (.+)')
-ipre = re.compile('HostName (.+)')
-confcont = open(env.ssh_config_path,'r').read()
-hosts = ipre.findall(confcont)
-ips = hostre.findall(confcont)
+hostre = re.compile('^([\s]*)Host (.+)')
+ipre = re.compile('^([\s]*)HostName (.+)')
+confcont = open(env.ssh_config_path,'r').read().split("\n")
+hosts = [r.group(2) for r in filter(lambda x: x,[ipre.search(r) for r in confcont])]
+ips = [r.group(2) for r in filter(lambda x: x,[hostre.search(r) for r in confcont])]
 # parsed dictionary from ssh config includes hosts and their ips 
 HOSTS = dict(list(zip(ips,hosts)))
 

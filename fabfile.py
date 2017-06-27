@@ -210,7 +210,7 @@ def backup_nodedefs():
     fp.write(op)
     fp.close()
 @parallel
-def setup_network(snmpd_network=snmpd_network):
+def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbraddcmd=True):
     main_ip = HOSTS[env.host_string]
     my_floating_ips = [x for x in FLOATING_IPS if x[0]==env.host_string]
 
@@ -221,6 +221,7 @@ def setup_network(snmpd_network=snmpd_network):
     apnd='\n  '.join(apnd)
 
     gw = HOST_GATEWAYS.get(env.host_string) and HOST_GATEWAYS.get(env.host_string)  or DEFAULT_GATEWAY
+    #raise Exception('main_ip for',env.host_string,'is',main_ip)
     varss = {'main_ip':main_ip,
              'ovpn_internal_addr':ovpn_internal_addr,
              'ovpn_client_network':ovpn_client_network,
@@ -236,15 +237,25 @@ def setup_network(snmpd_network=snmpd_network):
         upload_template('server-confs/interfaces','interfaces.install',varss)
         with settings(warn_only=True):
             if run('diff /etc/network/interfaces /etc/network/interfaces.install'):
-                run('cp /etc/network/interfaces /etc/network/interfaces.backup')
-                run('cp /etc/network/interfaces.install /etc/network/interfaces')
+                if writecfg:
+                    run('cp /etc/network/interfaces /etc/network/interfaces.backup')
+                    run('cp /etc/network/interfaces.install /etc/network/interfaces')
+                else:
+                    print('NOT COPYING NEW CONFIG IN PLACE. it stays in /etc/network/interfaces')
                 tries = 0
-                while not run(NETWORKING_RESTART_CMD):
-                    if tries >= 5:
-                        break
-                    tries += 1
-                    sleep(1)
-            run('''ip link | grep -o "vnet[0-9]*"  > /tmp/vnets ; brctl show br0 | egrep -v '^(bridge name|br0)' | awk '{print $1}' >> /tmp/vnets ; cat /tmp/vnets | sort | uniq -u | xargs -r -L1 brctl addif br0 ; %s'''%NETWORKING_RESTART_CMD)
+                if restart:
+                    while not run(NETWORKING_RESTART_CMD):
+                        if tries >= 5:
+                            break
+                        tries += 1
+                        sleep(1)
+                else:
+                    print('NOT RUNNING NETWORKING RESTART:',NETWORKING_RESTART_CMD)
+            braddcmd = '''ip link | grep -o "vnet[0-9]*"  > /tmp/vnets ; brctl show br0 | egrep -v '^(bridge name|br0)' | awk '{print $1}' >> /tmp/vnets ; cat /tmp/vnets | sort | uniq -u | xargs -r -L1 brctl addif br0 ; %s'''%NETWORKING_RESTART_CMD
+            if runbraddcmd:
+                run(braddcmd)
+            else:
+                print('NOT RUNNING BRADDCMD',braddcmd)
             run('service isc-dhcp-server restart')
     install_snmpd(snmpd_network)
 
@@ -314,7 +325,7 @@ def install_ssh_config():
         put_ssh_privkey(kfn)
 
 @parallel
-def install(apt_update=False,snmpd_network=snmpd_network):
+def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=False):
     if apt_update or not fabric.contrib.files.exists('/var/cache/apt/pkgcache.bin'): run('sudo apt-get -q update')
     #install kvm
     run('sudo apt-get -q -y install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils isc-dhcp-server zile pigz tcpdump pv sendemail sysstat htop iftop nload xmlstarlet')
@@ -331,6 +342,9 @@ def install(apt_update=False,snmpd_network=snmpd_network):
     #ssh_config to access other hosts
     install_ssh_config() 
 
+    if stop_before_network: 
+        print('STOPPING BEFORE NETWORK CONFIG') 
+        return
     setup_network(snmpd_network)
     setup_port_forwarding()
     setup_dhcpd()
