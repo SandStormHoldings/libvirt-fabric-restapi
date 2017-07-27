@@ -232,7 +232,8 @@ def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbrad
              'vlan_bcast': main_network+'.0.255',
              'my_floating_ips':apnd,
              'extra':'',}
-
+    badaddr = '.'.join(ovpn_internal_addr.split('.')[0:2])
+    assert not main_ip.startswith(badaddr),"achtung - setting main ip to internal addr %s"%main_ip
     with cd('/etc/network'):
         upload_template('server-confs/interfaces','interfaces.install',varss)
         with settings(warn_only=True):
@@ -498,10 +499,15 @@ def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False):
                  'dest_host': dest_host,
                  'src_host':src_host}
             if not nocopy:
-                start = time.time()
-                run('pigz /var/lib/libvirt/images/%s.img'%image_name)
-                end = time.time()
-                print('pigz took',(end - start),'seconds')
+                pigzsrcname = '/var/lib/libvirt/images/%s.img'%image_name
+                pigzdstname = pigzsrcname+'.gz'
+                if exists(pigzdstname) and not exists(pigzsrcname):
+                    print('skipping pigz - compressed file exists without source file.')
+                else:
+                    start = time.time()
+                    run('pigz %s'%pigzsrcname)
+                    end = time.time()
+                    print('pigz took',(end - start),'seconds')
 
                 start = time.time()
                 local(rsynccmd)
