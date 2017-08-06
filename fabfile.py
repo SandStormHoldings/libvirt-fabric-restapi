@@ -1438,11 +1438,23 @@ def install_staticwebserver(authorized_keys_fn=None,
     run('service apache2 restart')
 
 
+def certbot_xenial():
+    from config import CERTBOT_GITOLITE_OWNER
+    cmds=['apt-get update',
+          'apt-get install software-properties-common',
+          'add-apt-repository ppa:certbot/certbot',
+          'apt-get update',
+          'apt-get install python-certbot-apache',
+          'certbot --apache -m %s'%CERTBOT_GITOLITE_OWNER
+    ]
+    for cmd in cmds:
+        run(cmd)
 
 def install_gitserver(gitolite=True,
                       gitweb=True,
                       user='git',
-                      vhost=None):
+                      vhost=None,
+                      certbot=False):
     lkeyname = ('-'.join(['id_rsa',user+'@'+env.host_string]))
     keyname=os.path.join('conf_repo',lkeyname)
     if not os.path.exists(keyname):
@@ -1477,9 +1489,15 @@ def install_gitserver(gitolite=True,
         run('chmod -R g+rx /home/%s/repositories'%user)
         run('a2enmod auth_digest')
         run('a2enmod cgi')
+        run('a2enmod ssl')
         run('a2ensite gitweb.httpd.conf')
         run('cpan install CGI.pm')
+        if certbot:
+            cn = run('lsb_release -c -s')
+            assert cn=='xenial',"certbot only works with xenial atm"
+            certbot_xenial()
         run('service apache2 restart')
+    
 
 def iftop_settings():
     put('node-confs/iftoprc','/root/.iftoprc')
