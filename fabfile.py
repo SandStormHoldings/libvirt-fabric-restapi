@@ -329,7 +329,7 @@ def install_ssh_config():
 def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=False):
     if apt_update or not fabric.contrib.files.exists('/var/cache/apt/pkgcache.bin'): run('sudo apt-get -q update')
     #install kvm
-    run('sudo apt-get -q -y install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils isc-dhcp-server zile pigz tcpdump pv sendemail sysstat htop iftop nload xmlstarlet')
+    run('sudo apt-get -q -y install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils isc-dhcp-server zile pigz tcpdump pv sendemail sysstat htop iftop nload xmlstarlet ncdu mosh')
     run('sudo adduser `id -un` libvirtd')
     run("echo '%s' > /etc/hostname"%env.host_string)
     run ("hostname %s"%env.host_string)
@@ -362,6 +362,7 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
 
 def setup_port_forwarding():
     myipt = init_ipt()
+    print('myipt is',myipt)
     if not env.host_string in FORWARDED_PORTS: return
     for fp in FORWARDED_PORTS[env.host_string]:
         cmd = 'iptables -tnat -A PREROUTING -d %(endpoint_host)s/32 -p tcp -m tcp --dport %(endpoint_port)s -j DNAT --to-destination %(redirect_host)s:%(redirect_port)s'%fp
@@ -618,7 +619,7 @@ def create_node(node_name,
     assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
     ns = uuid.NAMESPACE_DNS
     print('about to create uuid for node with ns %s, node name %s'%(ns,node_name))
-    uuidi = uuid.uuid5(namespace=ns,name=node_name.encode('utf-8'))
+    uuidi = uuid.uuid5(namespace=ns,name=node_name)
     variables = {
         'uuid':str(uuidi),
         'name':node_name,
@@ -1391,7 +1392,7 @@ for f in $(cat /etc/jumpers.txt) ; do echo "Match User $f
         local('sendemail -f %(sender)s -t %(email)s -m "add to your ~/.ssh/config an entry with User %(client)s ; HostName %(hostname)s and IdentityFile being your existing git ssh key." -u "ssh jumphost access for %(client)s" -xu %(mail_login)s -xp %(mail_password)s -s %(mail_server)s:%(mail_port)s' % params)        
 
 def htdigest_upload():
-    put('conf_repo/htdigest.pw','/etc/apache2/digest.pw')
+    put('conf_repo/digest.pw','/etc/apache2/digest.pw')
     
 def install_staticwebserver(authorized_keys_fn=None,
                             vhost='static.ezd.lan',
@@ -1461,7 +1462,7 @@ def install_gitserver(gitolite=True,
     if gitweb:
         assert vhost,"No vhost specified"
 
-        run('apt-get install -q -y highlight gitweb')
+        run('apt-get install -q -y highlight gitweb libapache2-mod-perl2 make')
         append('/etc/gitweb.conf','''$feature{'highlight'}{'default'} = [1];''')
         append('/etc/gitweb.conf',"""$projectroot = '/home/%s/repositories'"""%user)
         upload_template('node-confs/gitweb.httpd.conf',
@@ -1469,12 +1470,14 @@ def install_gitserver(gitolite=True,
                         {'vhost':vhost,
                          'digest realm':DIGEST_REALM})
         if not exists('/etc/apache2/digest.pw'):
-            put('conf_repo/htdigest.pw','/etc/apache2/digest.pw')
+            put('conf_repo/digest.pw','/etc/apache2/digest.pw')
         run('usermod -a -G %s www-data'%user)
         run('chmod g+r /home/%s/projects.list'%user)
         run('chmod -R g+rx /home/%s/repositories'%user)
         run('a2enmod auth_digest')
+        run('a2enmod cgi')
         run('a2ensite gitweb.httpd.conf')
+        run('cpan install CGI.pm')
         run('service apache2 restart')
 
 def iftop_settings():
