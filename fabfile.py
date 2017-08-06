@@ -1443,16 +1443,15 @@ def install_gitserver(gitolite=True,
                       gitweb=True,
                       user='git',
                       vhost=None):
-    lkeyname = '-'.join([env.host,user,'admin'])
+    lkeyname = ('-'.join(['id_rsa',user+'@'+env.host_string]))
     keyname=os.path.join('conf_repo',lkeyname)
-
-    if not os.path.exists(lkeyname):
-        cmd = 'ssh-keygen -N "" -f %s'%lkeyname
+    if not os.path.exists(keyname):
+        cmd = 'ssh-keygen -N "" -f %s'%keyname
         local(cmd)
     if gitolite:
         with settings(warn_only=True):
             run('adduser {user} --disabled-password --gecos ""'.format(user=user))
-            put(lkeyname+'.pub','/home/%s/admin.pub'%(user))
+            put(keyname+'.pub','/home/%s/admin.pub'%(user))
         run('apt-get install -q -y git-core')
         with settings(sudo_user=user):
             with cd('/home/%s'%user):
