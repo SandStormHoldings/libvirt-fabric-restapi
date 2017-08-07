@@ -1450,6 +1450,9 @@ def certbot_xenial():
     for cmd in cmds:
         run(cmd)
 
+def gitweb_patch():
+    put('node-confs/gitweb-additions.diff','/tmp/gitweb-additions.diff')
+    run('cd / ; patch -p0 < /tmp/gitweb-additions.diff')
 def install_gitserver(gitolite=True,
                       gitweb=True,
                       user='git',
@@ -1476,6 +1479,7 @@ def install_gitserver(gitolite=True,
         assert vhost,"No vhost specified"
 
         run('apt-get install -q -y highlight gitweb libapache2-mod-perl2 make')
+        gitweb_patch()
         append('/etc/gitweb.conf','''$feature{'highlight'}{'default'} = [1];''')
         append('/etc/gitweb.conf',"""$projectroot = '/home/%s/repositories'"""%user)
         upload_template('node-confs/gitweb.httpd.conf',
