@@ -1451,9 +1451,12 @@ def certbot_xenial():
         run(cmd)
 
 # this is a small dhcp workaround needed for 16.04 that undergo upgrades
-def dhclient_script_fix():
-    put('node-confs/dhclient-script.diff','/tmp/dhclient-script.diff')
-    run('cd / ; patch -p0 < /tmp/dhclient-script.diff')
+def dhclient_script_fix(node):
+    tfn = '/tmp/dhclient-script.diff'
+    put('node-confs/dhclient-script.diff',tfn)
+    run('scp %s %s:%s'%(tfn,node,tfn))    
+    with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s'%node):
+        run('( cd / ; patch -p0 ) < %s'%tfn)
     
 def gitweb_patch():
     put('node-confs/gitweb-additions.diff','/tmp/gitweb-additions.diff')
