@@ -1450,9 +1450,15 @@ def certbot_xenial():
     for cmd in cmds:
         run(cmd)
 
+# this is a small dhcp workaround needed for 16.04 that undergo upgrades
+def dhclient_script_fix():
+    put('node-confs/dhclient-script.diff','/tmp/dhclient-script.diff')
+    run('cd / ; patch -p0 < /tmp/dhclient-script.diff')
+    
 def gitweb_patch():
     put('node-confs/gitweb-additions.diff','/tmp/gitweb-additions.diff')
     run('cd / ; patch -p0 < /tmp/gitweb-additions.diff')
+
 def install_gitserver(gitolite=True,
                       gitweb=True,
                       user='git',
