@@ -1510,7 +1510,29 @@ def install_gitserver(gitolite=True,
             assert cn=='xenial',"certbot only works with xenial atm"
             certbot_xenial()
         run('service apache2 restart')
-    
+
+def install_tasks(user='tasks',
+                  fetch=True,
+                  install=True
+):
+    run('apt-get install -q -y git software-properties-common apt-transport-https ca-certificates curl')
+    run('curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -')
+    run('add-apt-repository    "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"')
+    run('apt-get update')
+    run('apt-get install docker-ce')
+    run('usermod -aG docker {user}'.format(user=user))
+    with cd('/home/{user}'.format(user=user)):    
+        if fetch:
+            with settings(warn_only=True): run('adduser {user} --disabled-password --gecos ""'.format(user=user))
+            run('git clone https://github.com/SandStormHoldings/ScratchDocs')
+            with cd('ScratchDocs'):
+                run('git submodule update --init --recursive')
+            run('chown -R tasks:tasks ScratchDocs')
+            run('shopt -s dotglob nullglob ; mv ScratchDocs/* .')
+        if install:
+            sudo('./setup.sh')
+
+        
 
 def iftop_settings():
     put('node-confs/iftoprc','/root/.iftoprc')
