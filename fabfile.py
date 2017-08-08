@@ -1462,6 +1462,8 @@ def gitweb_patch():
     put('node-confs/gitweb-additions.diff','/tmp/gitweb-additions.diff')
     run('cd / ; patch -p0 < /tmp/gitweb-additions.diff')
 
+def fix_gitweb_perms(user):
+    sed('/home/{user}/.gitolite.rc'.format(user=user),'UMASK                           =>  ([0-9]+)','UMASK                           =>  0027')
 def install_gitserver(gitolite=True,
                       gitweb=True,
                       user='git',
@@ -1497,6 +1499,7 @@ def install_gitserver(gitolite=True,
                          'digest realm':DIGEST_REALM})
         htdigest_upload()
         run('usermod -a -G %s www-data'%user)
+        fix_gitweb_perms(user=user)
         run('chmod g+r /home/%s/projects.list'%user)
         run('chmod -R g+rx /home/%s/repositories'%user)
         run('a2enmod auth_digest')
