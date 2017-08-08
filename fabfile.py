@@ -1495,8 +1495,7 @@ def install_gitserver(gitolite=True,
                         '/etc/apache2/sites-available/gitweb.httpd.conf',
                         {'vhost':vhost,
                          'digest realm':DIGEST_REALM})
-        if not exists('/etc/apache2/digest.pw'):
-            put('conf_repo/digest.pw','/etc/apache2/digest.pw')
+        htdigest_upload()
         run('usermod -a -G %s www-data'%user)
         run('chmod g+r /home/%s/projects.list'%user)
         run('chmod -R g+rx /home/%s/repositories'%user)
@@ -1515,7 +1514,9 @@ def install_tasks(user='tasks',
                   prequisites=True,
                   fetch=True,
                   overwrite=False,
-                  install=True
+                  install=True,
+                  apache=True,
+                  vhost=None
 ):
     if prequisites:
         run('apt-get install -q -y jq postgresql-client-common postgresql-client dos2unix pv') # requirements of tasks themselves (ScratchDocs/setup.sh)
@@ -1536,7 +1537,22 @@ def install_tasks(user='tasks',
             run('shopt -s dotglob nullglob ; mv ScratchDocs/* . && rm -rf ScratchDocs')
         if install:
             with settings(sudo_user=user): sudo('./setup.sh')
-
+        with settings(sudo_user=user):
+            pyhost = run("""docker inspect tasks_py | jq '.[0].NetworkSettings.Networks.bridge.IPAddress' | sed 's/"//g'""")
+            proxy_pass = 'http://%s:8090/'%pyhost
+    if apache:
+        assert vhost,"no vhost passed"
+        run('apt-get install -q -y apache2')
+        run('a2enmod proxy proxy_http ssl auth_digest')
+        upload_template('node-confs/tasks.httpd.conf',
+                '/etc/apache2/sites-available/tasks.httpd.conf',
+                {'vhost':vhost,
+                 'digest realm':DIGEST_REALM,
+                 'proxy_pass':proxy_pass})
+        htdigest_upload()
+        run('a2ensite tasks.httpd')
+        run('service apache2 reload')
+        
         
 
 def iftop_settings():
