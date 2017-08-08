@@ -1512,25 +1512,30 @@ def install_gitserver(gitolite=True,
         run('service apache2 restart')
 
 def install_tasks(user='tasks',
+                  prequisites=True,
                   fetch=True,
+                  overwrite=False,
                   install=True
 ):
-    run('apt-get install -q -y git software-properties-common apt-transport-https ca-certificates curl')
-    run('curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -')
-    run('add-apt-repository    "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"')
-    run('apt-get update')
-    run('apt-get install docker-ce')
-    run('usermod -aG docker {user}'.format(user=user))
+    if prequisites:
+        run('apt-get install -q -y jq postgresql-client-common postgresql-client dos2unix pv') # requirements of tasks themselves (ScratchDocs/setup.sh)
+        run('apt-get install -q -y git software-properties-common apt-transport-https ca-certificates curl')
+        run('curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -')
+        run('add-apt-repository    "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"')
+        run('apt-get update')
+        run('apt-get install -y -q docker-ce')
     with cd('/home/{user}'.format(user=user)):    
         if fetch:
             with settings(warn_only=True): run('adduser {user} --disabled-password --gecos ""'.format(user=user))
+            run('usermod -aG docker {user}'.format(user=user))
+            if overwrite: run('rm -rf .git *') # get rid of the homedir entirely
             run('git clone https://github.com/SandStormHoldings/ScratchDocs')
             with cd('ScratchDocs'):
                 run('git submodule update --init --recursive')
             run('chown -R tasks:tasks ScratchDocs')
-            run('shopt -s dotglob nullglob ; mv ScratchDocs/* .')
+            run('shopt -s dotglob nullglob ; mv ScratchDocs/* . && rm -rf ScratchDocs')
         if install:
-            sudo('./setup.sh')
+            with settings(sudo_user=user): sudo('./setup.sh')
 
         
 
