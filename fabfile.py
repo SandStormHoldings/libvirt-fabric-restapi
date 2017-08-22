@@ -1462,6 +1462,8 @@ def gitweb_patch():
     put('node-confs/gitweb-additions.diff','/tmp/gitweb-additions.diff')
     run('cd / ; patch -p0 < /tmp/gitweb-additions.diff')
 
+def fix_gitweb_perms(user):
+    sed('/home/{user}/.gitolite.rc'.format(user=user),'UMASK                           =>  ([0-9]+)','UMASK                           =>  0027')
 def install_gitserver(gitolite=True,
                       gitweb=True,
                       user='git',
@@ -1495,9 +1497,9 @@ def install_gitserver(gitolite=True,
                         '/etc/apache2/sites-available/gitweb.httpd.conf',
                         {'vhost':vhost,
                          'digest realm':DIGEST_REALM})
-        if not exists('/etc/apache2/digest.pw'):
-            put('conf_repo/digest.pw','/etc/apache2/digest.pw')
+        htdigest_upload()
         run('usermod -a -G %s www-data'%user)
+        fix_gitweb_perms(user=user)
         run('chmod g+r /home/%s/projects.list'%user)
         run('chmod -R g+rx /home/%s/repositories'%user)
         run('a2enmod auth_digest')
@@ -1512,27 +1514,47 @@ def install_gitserver(gitolite=True,
         run('service apache2 restart')
 
 def install_tasks(user='tasks',
+                  prequisites=True,
                   fetch=True,
-                  install=True
+                  overwrite=False,
+                  install=True,
+                  apache=True,
+                  vhost=None
 ):
-    run('apt-get install -q -y jq postgresql-client-common postgresql-client dos2unix') # tasks deps
-    run('apt-get install -q -y git software-properties-common apt-transport-https ca-certificates curl')
-    run('curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -')
-    run('add-apt-repository    "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"')
-    run('apt-get update')
-    run('apt-get install docker-ce')
+    if prequisites:
+        run('apt-get install -q -y jq postgresql-client-common postgresql-client dos2unix pv') # requirements of tasks themselves (ScratchDocs/setup.sh)
+        run('apt-get install -q -y git software-properties-common apt-transport-https ca-certificates curl')
+        run('curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -')
+        run('add-apt-repository    "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"')
+        run('apt-get update')
+        run('apt-get install -y -q docker-ce')
     with cd('/home/{user}'.format(user=user)):    
         if fetch:
             with settings(warn_only=True): run('adduser {user} --disabled-password --gecos ""'.format(user=user))
             run('usermod -aG docker {user}'.format(user=user))
+            if overwrite: run('rm -rf .git *') # get rid of the homedir entirely
             run('git clone https://github.com/SandStormHoldings/ScratchDocs')
             with cd('ScratchDocs'):
                 run('git submodule update --init --recursive')
             run('chown -R tasks:tasks ScratchDocs')
-            run('shopt -s dotglob nullglob ; mv ScratchDocs/* .')
+            run('shopt -s dotglob nullglob ; mv ScratchDocs/* . && rm -rf ScratchDocs')
         if install:
             with settings(sudo_user=user): sudo('./setup.sh')
-
+        with settings(sudo_user=user):
+            pyhost = run("""docker inspect tasks_py | jq '.[0].NetworkSettings.Networks.bridge.IPAddress' | sed 's/"//g'""")
+            proxy_pass = 'http://%s:8090/'%pyhost
+    if apache:
+        assert vhost,"no vhost passed"
+        run('apt-get install -q -y apache2')
+        run('a2enmod proxy proxy_http ssl auth_digest')
+        upload_template('node-confs/tasks.httpd.conf',
+                '/etc/apache2/sites-available/tasks.httpd.conf',
+                {'vhost':vhost,
+                 'digest realm':DIGEST_REALM,
+                 'proxy_pass':proxy_pass})
+        htdigest_upload()
+        run('a2ensite tasks.httpd')
+        run('service apache2 reload')
         
 
 def iftop_settings():
