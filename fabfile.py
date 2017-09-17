@@ -210,7 +210,7 @@ def backup_nodedefs():
     fp.write(op)
     fp.close()
 @parallel
-def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbraddcmd=True):
+def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbraddcmd=False):
     main_ip = HOSTS[env.host_string]
     my_floating_ips = [x for x in FLOATING_IPS if x[0]==env.host_string]
 
