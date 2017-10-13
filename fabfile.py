@@ -211,7 +211,7 @@ def backup_nodedefs():
     fp.write(op)
     fp.close()
 @parallel
-def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbraddcmd=True):
+def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbraddcmd=False):
     main_ip = HOSTS[env.host_string]
     my_floating_ips = [x for x in FLOATING_IPS if x[0]==env.host_string]
 
@@ -332,7 +332,7 @@ def install_ssh_config():
 def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=False):
     if apt_update or not fabric.contrib.files.exists('/var/cache/apt/pkgcache.bin'): run('sudo apt-get -q update')
     #install kvm
-    run('sudo apt-get -q -y install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils isc-dhcp-server zile pigz tcpdump pv sendemail sysstat htop iftop nload xmlstarlet')
+    run('sudo apt-get -q -y install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils isc-dhcp-server zile pigz tcpdump pv sendemail sysstat htop iftop nload xmlstarlet ncdu mosh')
     run('sudo adduser `id -un` libvirtd')
     run("echo '%s' > /etc/hostname"%env.host_string)
     run ("hostname %s"%env.host_string)
@@ -365,6 +365,7 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
 
 def setup_port_forwarding():
     myipt = init_ipt()
+    print('myipt is',myipt)
     if not env.host_string in FORWARDED_PORTS: return
     for fp in FORWARDED_PORTS[env.host_string]:
         cmd = 'iptables -tnat -A PREROUTING -d %(endpoint_host)s/32 -p tcp -m tcp --dport %(endpoint_port)s -j DNAT --to-destination %(redirect_host)s:%(redirect_port)s'%fp
@@ -620,8 +621,8 @@ def create_node(node_name,
     assert fabric.contrib.files.exists(tplfn),"%s does not exist"%tplfn
     assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
     ns = uuid.NAMESPACE_DNS
-    print('about to create uuid for node with ns %s, node name %s'%(ns,node_name))
-    uuidi = uuid.uuid5(namespace=ns,name=node_name.encode('utf-8'))
+    print('about to create uuid for node with ns %s, node name %s' % (ns, node_name.encode('utf-8')))
+    uuidi = uuid.uuid5(namespace=ns, name=node_name.encode('utf-8'))
     variables = {
         'uuid':str(uuidi),
         'name':node_name,
@@ -1402,7 +1403,7 @@ for f in $(cat /etc/jumpers.txt) ; do echo "Match User $f
         local('sendemail -f %(sender)s -t %(email)s -m "add to your ~/.ssh/config an entry with User %(client)s ; HostName %(hostname)s and IdentityFile being your existing git ssh key." -u "ssh jumphost access for %(client)s" -xu %(mail_login)s -xp %(mail_password)s -s %(mail_server)s:%(mail_port)s' % params)        
 
 def htdigest_upload():
-    put('conf_repo/htdigest.pw','/etc/apache2/digest.pw')
+    put('conf_repo/digest.pw','/etc/apache2/digest.pw')
     
 def install_staticwebserver(authorized_keys_fn=None,
                             vhost='static.ezd.lan',
@@ -1448,12 +1449,39 @@ def install_staticwebserver(authorized_keys_fn=None,
     run('service apache2 restart')
 
 
+def certbot_xenial():
+    from config import CERTBOT_GITOLITE_OWNER
+    cmds=['apt-get update',
+          'apt-get install software-properties-common',
+          'add-apt-repository ppa:certbot/certbot',
+          'apt-get update',
+          'apt-get install python-certbot-apache',
+          'certbot --apache -m %s'%CERTBOT_GITOLITE_OWNER
+    ]
+    for cmd in cmds:
+        run(cmd)
 
+# this is a small dhcp workaround needed for 16.04 that undergo upgrades
+def dhclient_script_fix(node):
+    tfn = '/tmp/dhclient-script.diff'
+    put('node-confs/dhclient-script.diff',tfn)
+    run('scp %s %s:%s'%(tfn,node,tfn))    
+    with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s'%node):
+        run('( cd / ; patch -p0 ) < %s'%tfn)
+    
+def gitweb_patch():
+    put('node-confs/gitweb-additions.diff','/tmp/gitweb-additions.diff')
+    run('cd / ; patch -p0 < /tmp/gitweb-additions.diff')
+
+def fix_gitweb_perms(user):
+    sed('/home/{user}/.gitolite.rc'.format(user=user),'UMASK                           =>  ([0-9]+)','UMASK                           =>  0027')
 def install_gitserver(gitolite=True,
                       gitweb=True,
                       user='git',
-                      vhost=None):
-    keyname='-'.join([env.host,user,'admin'])
+                      vhost=None,
+                      certbot=False):
+    lkeyname = ('-'.join(['id_rsa',user+'@'+env.host_string]))
+    keyname=os.path.join('conf_repo',lkeyname)
     if not os.path.exists(keyname):
         cmd = 'ssh-keygen -N "" -f %s'%keyname
         local(cmd)
@@ -1472,21 +1500,73 @@ def install_gitserver(gitolite=True,
     if gitweb:
         assert vhost,"No vhost specified"
 
-        run('apt-get install -q -y highlight gitweb')
+        run('apt-get install -q -y highlight gitweb libapache2-mod-perl2 make')
+        gitweb_patch()
         append('/etc/gitweb.conf','''$feature{'highlight'}{'default'} = [1];''')
         append('/etc/gitweb.conf',"""$projectroot = '/home/%s/repositories'"""%user)
         upload_template('node-confs/gitweb.httpd.conf',
                         '/etc/apache2/sites-available/gitweb.httpd.conf',
                         {'vhost':vhost,
                          'digest realm':DIGEST_REALM})
-        if not exists('/etc/apache2/digest.pw'):
-            put('conf_repo/htdigest.pw','/etc/apache2/digest.pw')
+        htdigest_upload()
         run('usermod -a -G %s www-data'%user)
+        fix_gitweb_perms(user=user)
         run('chmod g+r /home/%s/projects.list'%user)
         run('chmod -R g+rx /home/%s/repositories'%user)
         run('a2enmod auth_digest')
+        run('a2enmod cgi')
+        run('a2enmod ssl')
         run('a2ensite gitweb.httpd.conf')
+        run('cpan install CGI.pm')
+        if certbot:
+            cn = run('lsb_release -c -s')
+            assert cn=='xenial',"certbot only works with xenial atm"
+            certbot_xenial()
         run('service apache2 restart')
+
+def install_tasks(user='tasks',
+                  prequisites=True,
+                  fetch=True,
+                  overwrite=False,
+                  install=True,
+                  apache=True,
+                  vhost=None
+):
+    if prequisites:
+        run('apt-get install -q -y jq postgresql-client-common postgresql-client dos2unix pv') # requirements of tasks themselves (ScratchDocs/setup.sh)
+        run('apt-get install -q -y git software-properties-common apt-transport-https ca-certificates curl')
+        run('curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -')
+        run('add-apt-repository    "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"')
+        run('apt-get update')
+        run('apt-get install -y -q docker-ce')
+    with cd('/home/{user}'.format(user=user)):    
+        if fetch:
+            with settings(warn_only=True): run('adduser {user} --disabled-password --gecos ""'.format(user=user))
+            run('usermod -aG docker {user}'.format(user=user))
+            if overwrite: run('rm -rf .git *') # get rid of the homedir entirely
+            run('git clone https://github.com/SandStormHoldings/ScratchDocs')
+            with cd('ScratchDocs'):
+                run('git submodule update --init --recursive')
+            run('chown -R tasks:tasks ScratchDocs')
+            run('shopt -s dotglob nullglob ; mv ScratchDocs/* . && rm -rf ScratchDocs')
+        if install:
+            with settings(sudo_user=user): sudo('./setup.sh')
+        with settings(sudo_user=user):
+            pyhost = run("""docker inspect tasks_py | jq '.[0].NetworkSettings.Networks.bridge.IPAddress' | sed 's/"//g'""")
+            proxy_pass = 'http://%s:8090/'%pyhost
+    if apache:
+        assert vhost,"no vhost passed"
+        run('apt-get install -q -y apache2')
+        run('a2enmod proxy proxy_http ssl auth_digest')
+        upload_template('node-confs/tasks.httpd.conf',
+                '/etc/apache2/sites-available/tasks.httpd.conf',
+                {'vhost':vhost,
+                 'digest realm':DIGEST_REALM,
+                 'proxy_pass':proxy_pass})
+        htdigest_upload()
+        run('a2ensite tasks.httpd')
+        run('service apache2 reload')
+        
 
 def iftop_settings():
     put('node-confs/iftoprc','/root/.iftoprc')

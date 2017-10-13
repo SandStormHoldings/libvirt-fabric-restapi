@@ -1,0 +1,18 @@
+--- gitweb.cgi.orig	2017-08-07 08:06:24.623306033 +0200
++++ /usr/share/gitweb/gitweb.cgi	2017-08-07 08:09:19.298226091 +0200
+@@ -5899,6 +5899,7 @@
+ 		if (defined $snapshot_links) {
+ 			print " | " . $snapshot_links;
+ 		}
++		print " | ".$commit;
+ 		print "</td>\n" .
+ 		      "</tr>\n";
+ 	}
+@@ -6059,6 +6060,7 @@
+ 		      "<td class=\"link\">" .
+ 		      $cgi->a({-href => href(action=>"shortlog", hash=>$ref{'fullname'})}, "shortlog") . " | " .
+ 		      $cgi->a({-href => href(action=>"log", hash=>$ref{'fullname'})}, "log") . " | " .
++                      $cgi->a({-href => href(action=>"commitdiff", hash=>$ref{'fullname'}, "hash_parent"=>"staging")},"staging") . " | " .
+ 		      $cgi->a({-href => href(action=>"tree", hash=>$ref{'fullname'}, hash_base=>$ref{'fullname'})}, "tree") .
+ 		      "</td>\n" .
+ 		      "</tr>";

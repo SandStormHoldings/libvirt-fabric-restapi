@@ -90,7 +90,10 @@ assert len(FLOATING_IPS)== len(set([k[1] for k in FLOATING_IPS])),"more than a s
 
 VLAN_GATEWAYS={} ; VLAN_RANGES={} ; HOST_IDX={}
 for ip in [ip for ip in ips if HOST_PREFIX in ip]:
-    i = int(ip.replace(HOST_PREFIX,''))
+    try:
+        i = int(ip.replace(HOST_PREFIX,''))
+    except ValueError:
+        continue
     HOST_IDX[ip]=i
     VLAN_GATEWAYS[ip]=gate(i)
     VLAN_RANGES[ip]=netrange(i,i)

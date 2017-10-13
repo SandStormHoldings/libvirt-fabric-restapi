@@ -1,0 +1,20 @@
+--- dhclient-script	2017-05-25 14:37:22.000000000 +0200
++++ /sbin/dhclient-script	2017-08-07 08:49:12.221295342 +0200
+@@ -303,7 +303,7 @@
+ 
+ 	    # if we have $new_rfc3442_classless_static_routes then we have to
+ 	    # ignore $new_routers entirely
+-	    if [ ! "$new_rfc3442_classless_static_routes" ]; then
++	    if [ ! "$new_rfc3442_classless_static_routers" ]; then
+ 		    # set if_metric if IF_METRIC is set or there's more than one router
+ 		    if_metric="$IF_METRIC"
+ 		    if [ "${new_routers%% *}" != "${new_routers}" ]; then
+@@ -382,7 +382,7 @@
+         if [ -z "$new_routers" ] || ping -q -c 1 "${new_routers%% *}"; then
+ 	    # if we have $new_rfc3442_classless_static_routes then we have to
+ 	    # ignore $new_routers entirely
+-	    if [ ! "$new_rfc3442_classless_static_routes" ]; then
++	    if [ ! "$new_rfc3442_classless_static_routers" ]; then
+ 		    if [ -n "$alias_ip_address" ] &&
+ 		       [ "$new_ip_address" != "$alias_ip_address" ]; then
+ 			# separate alias IP given => set up the alias IP & add host route to it

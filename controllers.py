@@ -274,7 +274,6 @@ def new_node(request,host=None):
             'vcpu':request.params.get('vcpu',DEFAULT_VCPU),
             'pubkey':request.params.get('pubkey'),
             'simulate':request.params.get('simulate') and request.params.get('simulate') or False}
-
     assert args.get('name')
     imgn = args.get('image')
     imgkeys=list(IMAGES.keys())
