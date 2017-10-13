@@ -1,4 +1,5 @@
 #!/bin/bash
+/etc/losetup.sh
 /etc/iptables.sh
 ip route add 172.18.0.0/16 via 10.98.40.10 dev br0
 ip route add 172.19.0.0/16 via 10.97.15.10

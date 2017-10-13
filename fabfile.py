@@ -22,6 +22,7 @@ import time
 from macgen import genmacs,randomMAC
 from collections import defaultdict
 from fabric.api import *
+import hashlib
 env.use_ssh_config = True
 env.reject_unknown_hosts = False
 env.disable_known_hosts = False
@@ -30,12 +31,12 @@ from fabric.contrib.files import exists, contains,append, comment, upload_templa
 from fabric.context_managers import nested, shell_env
 import fabric.contrib.files
 
-
 from config import (HOSTS, VLAN_GATEWAYS, VLAN_RANGES, FLOATING_IPS,IPV6,DEFAULT_GATEWAY,HOST_GATEWAYS,
                     DEFAULT_RAM, DEFAULT_VCPU, OVPN_HOST, main_network, ovpn_client_network,ovpn_internal_addr,ssh_passwords,
                     ovpn_client_netmask, DIGEST_REALM, SECRET_KEY, IMAGES, LOWERED_PRIVILEGES, snmpd_network, OVPN_KEY_SENDER, JUMPHOST_EXTERNAL_IP, DEFAULT_SEARCH, DNS_HOST, OVPN_KEYDIR,FORWARDED_PORTS,
-                    SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX
+                    SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT
 )
+
 from config import MAIL_LOGIN,MAIL_PASSWORD,MAIL_SERVER,MAIL_PORT
 env.passwords=ssh_passwords
 
@@ -281,6 +282,7 @@ def setup_dhcpd():
         base_vars = {
             'vlan_gw': vlan_gw,
             'dhcpd_domain_name':DHCPD_DOMAIN_NAME,
+            'dns_host':DNS_HOST,
             'classless_static_routes':classless_static_routes,
             'main_network': main_network,
             'vlan_range': vlan_range,
@@ -304,8 +306,9 @@ def install_xsltproc():
     put('server-confs/stylesheet.xsl','/etc/stylesheet.xsl')
 
 @parallel
-def put_ssh_privkey(kfn,force_put=False):
-    rkfn = './.ssh/%s'%kfn
+def put_ssh_privkey(kfn,force_put=False,rkfnn=None):
+    if not rkfnn: rkfnn=kfn
+    rkfn = './.ssh/%s'%rkfnn
     if not force_put and env.host_string in LOWERED_PRIVILEGES:
         if fabric.contrib.files.exists(rkfn):
             run('rm %s'%rkfn)
@@ -776,6 +779,8 @@ def _lst(al=False, display=True,network_info=True,prefix_re=None,memory=False,re
             my_floating_ips = ', '.join([x[2] for x in [x for x in FLOATING_IPS if x[1]==dct[hname].get('virt_ip')]])
             rw = [hn,hid,hname,hstate,dct[hname].get('mac'),dct[hname].get('virt_ip'),my_floating_ips]
             dct[hname]['public_ip']=my_floating_ips
+            dct[hname]['fqdn']=hname+'.'+DEFAULT_SEARCH
+
             if memory: rw+=[mem]
             pt.add_row(rw)
 
@@ -792,6 +797,7 @@ def runon(virt_ip,cmd):
 def configure_node(node_name,fresh_check=True):
     ah = _lst(al=True,display=False)
     ourhost = ah[node_name]
+
     print(ourhost)
     assert 'host' in ourhost,"%s does not have 'host'"%ourhost
     if ourhost['host'] != env.host_string:
@@ -844,9 +850,14 @@ auto eth0:%(cnt)s
                 ('ssh -o "StrictHostkeyChecking no" %(virt_ip)s '%ourhost)+NETWORKING_RESTART_CMD,host=ourhost['host'])
 
     #2. set up a correct hostname
-    execute(run,'ssh -o "StrictHostkeyChecking no" %(virt_ip)s "hostname %(name)s"'%ourhost,host=ourhost['host'])
-    execute(run,'ssh -o "StrictHostkeyChecking no" %(virt_ip)s "echo %(name)s > /etc/hostname"'%ourhost,host=ourhost['host'])
-    execute(run,'ssh -o "StrictHostkeyChecking no" %(virt_ip)s "echo 127.0.0.1 %(name)s >> /etc/hosts"'%ourhost,host=ourhost['host'])
+
+    #ourhost['fqdn']=fqdn
+    execute(run,'ssh -o "StrictHostkeyChecking no" %(virt_ip)s "hostname %(fqdn)s"'%ourhost,host=ourhost['host'])
+    execute(run,'ssh -o "StrictHostkeyChecking no" %(virt_ip)s "echo %(fqdn)s > /etc/hostname"'%ourhost,host=ourhost['host'])
+
+    # the following is of arguable use if we have a working nameserver setup:
+    #execute(run,'ssh -o "StrictHostkeyChecking no" %(virt_ip)s "echo 127.0.0.1 %(name)s %(fqdn)s >> /etc/hosts"'%ourhost,host=ourhost['host'])
+
     if DNS_HOST:
         add_hostname_dns(ourhost['name'],ourhost['virt_ip'])
     return ourhost
@@ -1545,3 +1556,121 @@ def authorized_keys_del(dstfn,pubkeyfn):
     cont = open(sfn,'r').read().strip().replace('+','\+')
     assert exists(dstfn)
     sed(dstfn,cont,'',backup='')
+
+def ceph_install(apt=True):
+
+    # this guarantees access amongst your entire group: 
+    # fab -R ceph put_ssh_privkey:id_rsa-ceph,,id_rsa
+    # fab -R ceph authorized_keys_add:/root/.ssh/authorized_keys,conf_repo/id_rsa-ceph.pub
+
+    run("wget -q -O- 'https://download.ceph.com/keys/release.asc' | sudo apt-key add -")
+    run("echo deb https://download.ceph.com/debian/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list")
+    run('apt-get -q update')
+    run('apt-get install -y ceph-deploy ntp')
+
+    # from here on, we are walking according to http://docs.ceph.com/docs/master/start/quick-ceph-deploy/
+
+
+def openattic_install():
+    assert run('lsb_release -c -s')=='xenial'
+    run("wget http://apt.openattic.org/A7D3EAFA.txt -q -O - | apt-key add -")
+   
+    rows = [
+        "deb http://apt.openattic.org/ xenial main",
+        "deb-src http://apt.openattic.org/ xenial main",
+        "deb http://apt.openattic.org/ nightly main",
+        "deb-src http://apt.openattic.org/ nightly main"]
+    for r in rows:
+        append('/etc/apt/sources.list.d/openattic.list',r)
+    cmds=["apt-get update",
+          "apt-get install openattic",
+          "systemctl enable lvm2-lvmetad.socket",
+          "systemctl start lvm2-lvmetad.socket"]
+    for cmd in cmds: run(cmd)
+
+
+def drbd_setup(apt=False):
+    if apt:
+        run('add-apt-repository ppa:linbit/linbit-drbd9-stack')
+        run('apt-get install drbd-utils')
+
+    myhost = env.host_string
+    hs = env.host_string
+    actions=[]
+    ps = {'p':'primary','s':'secondary'}
+    myrole=None
+    for res,det in DRBD_RESOURCES.items():
+        matches = {'p':[det['primary']],'s':[det['secondary']]}
+        for r in ps:
+            matches[r]+=[m+'.'+DEFAULT_SEARCH for m in matches[r]]
+        if hs in matches['p'] or hs in matches['s']:
+            rfn = '/etc/drbd.d/kvm-%s.res'%res
+            detc = det.copy()
+            detc['name']=res
+            detc['primary_fqdn']=detc['primary']+'.'+DEFAULT_SEARCH
+            detc['secondary_fqdn']=detc['secondary']+'.'+DEFAULT_SEARCH
+            detc['rfn']=rfn
+            if 'secret' not in detc:
+                detc['secret']=hashlib.sha256(detc['name']+DRBD_SALT).hexdigest()[0:8]
+            for r in ps:
+                if hs in matches[r]:
+                    rt = run('ip a show')
+                    hips = [m.group(1) for m in re.finditer('inet ([0-9\.]+)',rt) if m.group(1) not in ['127.0.0.1']]
+                    lbl = '%s_ip'%ps[r]
+                    sip = detc[lbl]
+                    assert sip in hips,"could not find %s %s in %s"%(lbl,sip,hips)
+                    myrole = ps[r]
+            assert myrole, "role undetermined"
+            detc['role']=myrole
+            actions.append(detc)
+
+
+    # we avoid sorting to receive them in the same order as they are defined. 
+    # therefore, DEFINITION ORDER IN DRBD_RESOURCES IS MEANINGFUL!
+    #actions.sort(lambda x,y: cmp(x['name'],y['name']))
+
+    losetups = []
+    for i in range(len(actions)):
+        a=actions[i]
+        for r in ps.values():
+            if '%s_drbd'%r not in a:
+                a['%s_drbd'%r]='drbd%s'%i
+            if '%s_loop'%r not in a:
+                a['%s_loop'%r]='loop%s'%i
+        losetups.append('losetup /dev/%s /var/lib/libvirt/images/%s'%(a['%s_loop'%myrole],a['name']))
+        upload_template('server-confs/drbd-resource.res',
+                        a['rfn'],
+                        a)
+        #raise Exception(a['role'])
+    upload_template('server-confs/losetup.sh',
+                    '/etc/losetup.sh',
+                    {'losetups':"\n".join(losetups)})
+    run('chmod +x /etc/losetup.sh')
+    install_ipt()
+    for a in actions:
+        fn = os.path.join('/var/lib/libvirt/images/',a['name'])
+        ex = exists(fn)
+        if a['role']=='primary':
+            print("%s does not exist on primary %s ; creating"%(fn,env.host_string))
+            run('truncate -s %s %s'%(a['size'],fn))
+
+        elif a['role']=='secondary':
+            if not ex:
+                #raise Exception('gotta create',fn)
+                pass
+            else:
+                print('%s exists on secondary. not touching.'%fn)
+        #run('drbdadm create-md %s'%a['name'])
+
+    # if you are creating something to mirror an lvm container, here are the steps to unmount it:
+    # pvcreate /dev/drbd0
+    # vgcreate container /dev/drbd0
+    # lvcreate -L 18.62G container
+    # mount / add to fstab
+
+    # when you want to demote to secondary:
+    # dmsetup ls --tree -o inverted
+    # vgchange -an container
+    # to put it back on:
+    # vgchange -a y container
+
