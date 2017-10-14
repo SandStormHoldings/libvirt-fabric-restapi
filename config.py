@@ -76,6 +76,11 @@ IMAGE_FORMAT='raw'
 
 ALERTS_RECIPIENT=None
 ALERTS_RECIPIENT_NAME=None
+
+DRBD_RESOURCES={}
+DRBD_SALT=None
+NOTES={}
+
 # import the local overrides of the defaults above.
 from config_noodles import *
 try:
