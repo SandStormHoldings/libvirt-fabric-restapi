@@ -1669,10 +1669,11 @@ def openattic_install():
     for cmd in cmds: run(cmd)
 
 
-def drbd_setup(apt=False):
+def drbd_setup(apt=False,create_md=False):
     if apt:
-        run('add-apt-repository ppa:linbit/linbit-drbd9-stack')
-        run('apt-get install drbd-utils')
+        run('apt-get install -y software-properties-common')
+        run('add-apt-repository -y ppa:linbit/linbit-drbd9-stack')
+        run('apt-get install -y drbd-utils')
 
     myhost = env.host_string
     hs = env.host_string
@@ -1680,6 +1681,8 @@ def drbd_setup(apt=False):
     ps = {'p':'primary','s':'secondary'}
     myrole=None
     for res,det in DRBD_RESOURCES.items():
+        # lvm doubles these in device names. allow for now
+        #assert '-' not in res
         matches = {'p':[det['primary']],'s':[det['secondary']]}
         for r in ps:
             matches[r]+=[m+'.'+DEFAULT_SEARCH for m in matches[r]]
@@ -1687,8 +1690,8 @@ def drbd_setup(apt=False):
             rfn = '/etc/drbd.d/kvm-%s.res'%res
             detc = det.copy()
             detc['name']=res
-            detc['primary_fqdn']=detc['primary']+'.'+DEFAULT_SEARCH
-            detc['secondary_fqdn']=detc['secondary']+'.'+DEFAULT_SEARCH
+            detc['primary_fqdn']=detc['primary']+(DEFAULT_SEARCH in detc['primary'] and '' or '.'+DEFAULT_SEARCH)
+            detc['secondary_fqdn']=detc['secondary']+(DEFAULT_SEARCH in detc['secondary'] and '' or '.'+DEFAULT_SEARCH)
             detc['rfn']=rfn
             if 'secret' not in detc:
                 detc['secret']=hashlib.sha256(detc['name']+DRBD_SALT).hexdigest()[0:8]
@@ -1698,7 +1701,7 @@ def drbd_setup(apt=False):
                     hips = [m.group(1) for m in re.finditer('inet ([0-9\.]+)',rt) if m.group(1) not in ['127.0.0.1']]
                     lbl = '%s_ip'%ps[r]
                     sip = detc[lbl]
-                    assert sip in hips,"could not find %s %s in %s"%(lbl,sip,hips)
+                    assert sip in hips,"could not find %s %s in %s for %s"%(lbl,sip,hips,env.host_string)
                     myrole = ps[r]
             assert myrole, "role undetermined"
             detc['role']=myrole
@@ -1717,36 +1720,125 @@ def drbd_setup(apt=False):
                 a['%s_drbd'%r]='drbd%s'%i
             if '%s_loop'%r not in a:
                 a['%s_loop'%r]='loop%s'%i
-        losetups.append('losetup /dev/%s /var/lib/libvirt/images/%s'%(a['%s_loop'%myrole],a['name']))
+            if '%s_port'%r not in a:
+                a['%s_port'%r]=a['port']
+        losetups.append('losetup /dev/%s /var/lib/libvirt/images/%s #%s'%(a['%s_loop'%a['role']],a['name'],a['role']))
         upload_template('server-confs/drbd-resource.res',
                         a['rfn'],
                         a)
         #raise Exception(a['role'])
+
     upload_template('server-confs/losetup.sh',
                     '/etc/losetup.sh',
                     {'losetups':"\n".join(losetups)})
     run('chmod +x /etc/losetup.sh')
-    install_ipt()
     for a in actions:
-        fn = os.path.join('/var/lib/libvirt/images/',a['name'])
+        imgdir = '/var/lib/libvirt/images/'
+        fn = os.path.join(imgdir,a['name'])
         ex = exists(fn)
+        create=False
         if a['role']=='primary':
-            print("%s does not exist on primary %s ; creating"%(fn,env.host_string))
-            run('truncate -s %s %s'%(a['size'],fn))
-
+            if not ex:
+                print("%s does not exist on primary %s ; creating"%(fn,env.host_string))
+                create=True
+                sz = a['size']
         elif a['role']=='secondary':
             if not ex:
-                #raise Exception('gotta create',fn)
-                pass
+                create=True
+                with settings(warn_only=True):
+                    sz = execute(run,
+                                 'stat --printf="%s" '+fn,
+                                 host=a['primary'],
+                                 warn_only=True
+                                 )[a['primary']]
+                    # if we cannot contact the primary, just use the configuration setting
+                    if not sz or 'cannot stat' in sz:
+                        sz = a['size']
+                print('gotta secondary create',fn,'with size',sz)
             else:
                 print('%s exists on secondary. not touching.'%fn)
-        #run('drbdadm create-md %s'%a['name'])
+        if create:
+            run('mkdir -p %s && truncate -s %s %s'%(imgdir,sz,fn))
 
+        #run('drbdadm create-md %s'%a['name'])
+    install_ipt()
+
+    # kick start the thing
+    run('service drbd restart')
+    for a in actions:
+        resource = a['name']
+        drbd = a['%s_drbd'%a['role']]
+        mountpoint = a.get('mountpoint') and a.get('mountpoint') or os.path.join('/mnt/drbd',resource)
+        dev = '/dev/mapper/%s-lvol0'%resource.replace('-','--')
+        if create_md:
+            run('drbdadm create-md %s'%resource)
+            run('drbdadm attach %s'%resource)
+
+
+
+        append('/etc/fstab',"\t".join([dev,mountpoint,'ext4','defaults','0','0']))
+        run('mkdir -p %s'%mountpoint)
+
+        if a['role']=='primary' and create_md:
+
+            run('drbdadm primary --force %s'%resource)
+            # get on with lvm
+            run('pvcreate /dev/%s'%drbd)
+            run('vgcreate %s /dev/%s'%(resource,drbd))
+            run('lvcreate -l 100%FREE '+resource)
+            run('mkfs.ext4 -m0 %s'%dev)
+            run('mount %s'%mountpoint)
+
+def drbd_failover(resource,target,deactivate=True,activate=True):
+    source = env.host_string
+    mountpoint = DRBD_RESOURCES[resource].get('mountpoint') and DRBD_RESOURCES[resource].get('mountpoint') or os.path.join('/mnt/drbd/',resource)
+    lvmname = DRBD_RESOURCES[resource].get('lvmname') and DRBD_RESOURCES[resource].get('lvmname') or resource
+
+    # deactivate source (primary)
+    if deactivate:
+        execute(run,
+                'umount %s'%mountpoint,
+                host=source)
+        execute(run,
+                'vgchange -an %s'%lvmname,
+                host=source)
+        execute(run,
+                'drbdadm secondary %s'%resource,
+                host=source)
+    if activate:
+        execute(run,
+                'drbdadm primary %s'%resource,
+                host=target)
+        execute(run,
+                'vgchange -ay %s'%lvmname,
+                host=target)
+        execute(run,
+                'mount %s'%mountpoint,
+                host=target)
+
+def dump_xmls():
+    virts = [v.strip() for v in run("virsh list --all| tail -n+3 | awk '{print $2}'").split("\n")]
+    virtsf = [v+'.xml' for v in virts]
+    ldir = os.path.join('conf_repo/host_xmls/',env.host_string)
+    for v in virts:
+        if not v: continue
+        op = run('virsh dumpxml %s'%v)
+        if not os.path.exists(ldir): os.mkdir(ldir)
+        lfn = os.path.join(ldir,v+'.xml')
+        fp = open(lfn,'w')
+        fp.write(op)
+        fp.close()
+    try:
+        ld = os.listdir(ldir)
+    except OSError:
+        ld=[]
+        pass
+    for f in ld:
+        if f.endswith('.xml') and f not in virtsf:
+            os.unlink(os.path.join(ldir,f))
+    #raise Exception(resource,env.host_string,target)
+   
     # if you are creating something to mirror an lvm container, here are the steps to unmount it:
-    # pvcreate /dev/drbd0
-    # vgcreate container /dev/drbd0
-    # lvcreate -L 18.62G container
-    # mount / add to fstab
 
     # when you want to demote to secondary:
     # dmsetup ls --tree -o inverted
