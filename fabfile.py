@@ -1668,17 +1668,24 @@ def openattic_install():
           "systemctl start lvm2-lvmetad.socket"]
     for cmd in cmds: run(cmd)
 
+ps = {'p':'primary','s':'secondary'}
 
 def drbd_setup(apt=False,create_md=False):
+    # drbd protocol versions by ubuntu release:
+    # 14.04: version: 8.4.3 (api:1/proto:86-101)
+    # 16.04: version: 8.4.5 (api:1/proto:86-101)
+    # 12.04: version: 8.3.13 (api:88/proto:86-96)
     if apt:
-        run('apt-get install -y software-properties-common')
+        rel = run('lsb_release -c -s').strip()
+        if rel=='trusty': props='python-software-properties'
+        else: props=''
+        run('apt-get install -y software-properties-common %s'%props)
         run('add-apt-repository -y ppa:linbit/linbit-drbd9-stack')
         run('apt-get install -y drbd-utils')
 
     myhost = env.host_string
     hs = env.host_string
     actions=[]
-    ps = {'p':'primary','s':'secondary'}
     myrole=None
     for res,det in DRBD_RESOURCES.items():
         # lvm doubles these in device names. allow for now
@@ -1690,8 +1697,13 @@ def drbd_setup(apt=False,create_md=False):
             rfn = '/etc/drbd.d/kvm-%s.res'%res
             detc = det.copy()
             detc['name']=res
-            detc['primary_fqdn']=detc['primary']+(DEFAULT_SEARCH in detc['primary'] and '' or '.'+DEFAULT_SEARCH)
-            detc['secondary_fqdn']=detc['secondary']+(DEFAULT_SEARCH in detc['secondary'] and '' or '.'+DEFAULT_SEARCH)
+            if not detc['primary'].endswith(DEFAULT_SEARCH): pds = '.'+DEFAULT_SEARCH
+            else: pds = ''
+            if not detc['secondary'].endswith(DEFAULT_SEARCH): sds = '.'+DEFAULT_SEARCH
+            else: sds = ''
+
+            detc['primary_fqdn']=detc['primary']+pds
+            detc['secondary_fqdn']=detc['secondary']+sds
             detc['rfn']=rfn
             if 'secret' not in detc:
                 detc['secret']=hashlib.sha256(detc['name']+DRBD_SALT).hexdigest()[0:8]
@@ -1735,6 +1747,7 @@ def drbd_setup(apt=False,create_md=False):
     for a in actions:
         imgdir = '/var/lib/libvirt/images/'
         fn = os.path.join(imgdir,a['name'])
+        a['image'] = fn
         ex = exists(fn)
         create=False
         if a['role']=='primary':
@@ -1762,10 +1775,23 @@ def drbd_setup(apt=False,create_md=False):
 
         #run('drbdadm create-md %s'%a['name'])
     install_ipt()
-
+    lss = run('losetup -a').split("\n")
+    exloops = {}
+    for ls in lss:
+        lsre = re.compile('^(?P<devname>[^ \:]+): (?P<numbers>[^ ]+) \((?P<image>.+)(?P<deleted>| \(deleted\))\)$')
+        #raise Exception(ls)
+        lsp = lsre.search(ls.strip())
+        assert lsp.group('devname') not in exloops,lsp.group('devname')
+        exloops[lsp.group('devname')] = lsp.groupdict()
+    
     # kick start the thing
     run('service drbd restart')
+
     for a in actions:
+        myloop = a['%s_loop'%a['role']]
+        loopinfo = exloops['/dev/%s'%myloop]
+        assert not loopinfo['deleted'],"%s is deleted?!"%myloop
+        assert loopinfo['image']==a['image'],"%s != %s mismatch for loop device"%(loopinfo['image'],a['image'])
         resource = a['name']
         drbd = a['%s_drbd'%a['role']]
         mountpoint = a.get('mountpoint') and a.get('mountpoint') or os.path.join('/mnt/drbd',resource)
@@ -1789,29 +1815,52 @@ def drbd_setup(apt=False,create_md=False):
             run('mkfs.ext4 -m0 %s'%dev)
             run('mount %s'%mountpoint)
 
-def drbd_failover(resource,target,deactivate=True,activate=True):
+def drbd_failover(resource,target,deactivate=True,activate=True,recreate=False):
     source = env.host_string
-    mountpoint = DRBD_RESOURCES[resource].get('mountpoint') and DRBD_RESOURCES[resource].get('mountpoint') or os.path.join('/mnt/drbd/',resource)
-    lvmname = DRBD_RESOURCES[resource].get('lvmname') and DRBD_RESOURCES[resource].get('lvmname') or resource
+    res = DRBD_RESOURCES[resource]
+    for role in ps.values():
+        if res[role]==target:
+            tgtrole=role
+        elif res[role]==source:
+            srcrole=role
+    assert tgtrole and srcrole
+
+    tgt_drbd=execute(run,
+                     "egrep -A5 drbd-test2.dev.lan '/etc/drbd.d/kvm-test.res'   | egrep 'device ' | awk '{print $2}' | sed 's/;$//'",
+                     host=target)[target]
+        
+    mountpoint = res.get('mountpoint') and res.get('mountpoint') or os.path.join('/mnt/drbd/',resource)
+    lvmname = res.get('lvmname') and res.get('lvmname') or resource
+    
 
     # deactivate source (primary)
     if deactivate:
-        execute(run,
-                'umount %s'%mountpoint,
-                host=source)
-        execute(run,
+        cmds = ['umount %s'%mountpoint,
                 'vgchange -an %s'%lvmname,
-                host=source)
-        execute(run,
-                'drbdadm secondary %s'%resource,
-                host=source)
+                'drbdadm secondary %s'%resource]
+        for cmd in cmds:
+            execute(run,
+                    cmd,
+                    host=source)
     if activate:
-        execute(run,
-                'drbdadm primary %s'%resource,
-                host=target)
-        execute(run,
+        prst = execute(run,
+                       'drbdadm primary %s'%resource,
+                       warn_only=recreate,
+                       host=target)[target]
+        prst = execute(run,
                 'vgchange -ay %s'%lvmname,
-                host=target)
+                       warn_only=recreate,
+                       host=target)[target]
+        if prst!='' and recreate:
+            print('going to vgcreate "%s"'%prst)
+            tgtvol = '/dev/mapper/%s-lvol0'%resource.replace('-','--')
+            cmds = ['vgcreate %s %s'%(resource,tgt_drbd),
+                    'lvcreate -l 100%FREE '+resource,
+                    'mkfs.ext4 -m0 %s'%tgtvol]
+            for cmd in cmds:
+                execute(run,
+                        cmd,
+                        host=target)
         execute(run,
                 'mount %s'%mountpoint,
                 host=target)
