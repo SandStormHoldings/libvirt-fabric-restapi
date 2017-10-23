@@ -622,7 +622,7 @@ def create_node(node_name,
     assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
     ns = uuid.NAMESPACE_DNS
     print('about to create uuid for node with ns %s, node name %s' % (ns, node_name.encode('utf-8')))
-    uuidi = uuid.uuid5(namespace=ns, name=node_name.encode('utf-8'))
+    uuidi = uuid.uuid5(namespace=ns, name=node_name)
     variables = {
         'uuid':str(uuidi),
         'name':node_name,
@@ -1754,3 +1754,8 @@ def drbd_setup(apt=False):
     # to put it back on:
     # vgchange -a y container
 
+
+def postfix_install():
+    run('apt-get install -y postfix ca-certificates') #postfix:no-configuration
+    for fn in ['/etc/postfix/main.cf']:
+        put(os.path.join('conf_repo/node-configs/%s'%env.host_string,fn),fn)
