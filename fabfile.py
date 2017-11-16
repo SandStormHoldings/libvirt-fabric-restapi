@@ -299,6 +299,7 @@ def setup_dhcpd():
                 run('service isc-dhcp-server restart')
 
 
+
 @parallel
 def install_xsltproc():
     run('sudo apt-get -q -y install xsltproc libxml-xpath-perl')
@@ -329,7 +330,7 @@ def install_ssh_config():
         put_ssh_privkey(kfn)
 
 @parallel
-def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=False):
+def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=False,runbraddcmd=True):
     if apt_update or not fabric.contrib.files.exists('/var/cache/apt/pkgcache.bin'): run('sudo apt-get -q update')
     #install kvm
     run('sudo apt-get -q -y install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils isc-dhcp-server zile pigz tcpdump pv sendemail sysstat htop iftop nload xmlstarlet ncdu mosh')
@@ -349,7 +350,7 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
     if stop_before_network: 
         print('STOPPING BEFORE NETWORK CONFIG') 
         return
-    setup_network(snmpd_network)
+    setup_network(snmpd_network,runbraddcmd=runbraddcmd)
     setup_port_forwarding()
     setup_dhcpd()
     install_xsltproc()
@@ -377,7 +378,7 @@ def setup_port_forwarding():
     if os.path.exists(myipt):
         put(myipt,'/etc/iptables.sh')
 @parallel
-def destroy(node):
+def destroy(node,target=None):
     rt=run('virsh destroy %s ||:'%node)
     return rt
 
@@ -477,7 +478,7 @@ def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False):
     if not src_host or not mac_addr:
         alst = _lst(al=True)
         rt = alst[image_name]
-        assert rt,"could not find %s,\n%s" % (image_name, rt)
+        assert rt,"could not find %s,\n%s \n%s \n%s" % (image_name, rt, dest_host,src_host)
         src_host = rt['host']
         mac_addr = rt['mac']
         if rt['state'] == 'running':
@@ -623,6 +624,7 @@ def create_node(node_name,
     ns = uuid.NAMESPACE_DNS
     print('about to create uuid for node with ns %s, node name %s' % (ns, node_name.encode('utf-8')))
     uuidi = uuid.uuid5(namespace=ns, name=node_name.encode('utf-8'))
+
     variables = {
         'uuid':str(uuidi),
         'name':node_name,
@@ -1670,7 +1672,7 @@ def openattic_install():
 
 ps = {'p':'primary','s':'secondary'}
 
-def drbd_setup(apt=False,create_md=False):
+def drbd_setup(apt=False,create_md=False,test_failover=True,force_primary=True):
     # drbd protocol versions by ubuntu release:
     # 14.04: version: 8.4.3 (api:1/proto:86-101)
     # 16.04: version: 8.4.5 (api:1/proto:86-101)
@@ -1807,23 +1809,45 @@ def drbd_setup(apt=False,create_md=False):
 
         if a['role']=='primary' and create_md:
 
-            run('drbdadm primary --force %s'%resource)
+            run('drbdadm primary %s %s'%((force_primary and '--force' or ''),resource))
             # get on with lvm
             run('pvcreate /dev/%s'%drbd)
             run('vgcreate %s /dev/%s'%(resource,drbd))
             run('lvcreate -l 100%FREE '+resource)
-            run('mkfs.ext4 -m0 %s'%dev)
+            if force_primary:
+                run('mkfs.ext4 -m0 %s'%dev)
             run('mount %s'%mountpoint)
 
+def drbd_failover_test(resource,target,overwrite=False):
+        # make sure that failover is indeed working
+        execute(drbd_failover,
+                resource=resource,
+                target=target,
+                deactivate=True,
+                activate=True,
+                recreate=overwrite, # this is for some reason required during the first migration
+                host=env.host_string)
+        # and back
+        execute(drbd_failover,
+                resource=resource,
+                target=env.host_string,
+                deactivate=True,
+                activate=True,
+                recreate=False, # this is for some reason required during the first migration
+                host=target)
+
+
 def drbd_failover(resource,target,deactivate=True,activate=True,recreate=False):
+    tgtrole=None ; srcrole=None
     source = env.host_string
     res = DRBD_RESOURCES[resource]
     for role in ps.values():
+        #print('role',role,'val',res[role],'tgt',target,'src',source)
         if res[role]==target:
             tgtrole=role
         elif res[role]==source:
             srcrole=role
-    assert tgtrole and srcrole
+    assert tgtrole and srcrole,"%s -> %s (%s)"%(srcrole,tgtrole,env.host_string)
 
     tgt_drbd=execute(run,
                      "egrep -A5 drbd-test2.dev.lan '/etc/drbd.d/kvm-test.res'   | egrep 'device ' | awk '{print $2}' | sed 's/;$//'",
@@ -1895,3 +1919,76 @@ def dump_xmls():
     # to put it back on:
     # vgchange -a y container
 
+
+def etckeeper_install():
+    run('apt-get install -y git etckeeper')
+    run('git config --global user.email "root@%s.%s"'%(env.host_string,DEFAULT_SEARCH))
+    run('git config --global user.name "root"')
+    if not exists('/etc/.git'):
+        comment('/etc/etckeeper/etckeeper.conf','VCS="bzr"')
+        append('/etc/etckeeper/etckeeper.conf','VCS="git"')
+        with cd('/etc/'):
+            run('etckeeper init')
+            run('etckeeper commit initial')
+        #raise Exception('git repo not present in /etc')
+
+def etckeeper_install_nodes():
+    n = _lst(display=False)
+    for nn in n:
+        nip = nn+'.'+DEFAULT_SEARCH #n[nn]['virt_ip']
+        execute(etckeeper_install,host=nip)
+
+class lck():
+    def __init__(self, cr):
+        self.h = env.host_string
+        self.cr = cr
+        self.dn = os.path.join('lck',self.h)
+        self.lf = os.path.join(self.dn,self.cr+'.lock')
+    def __enter__(self):
+
+        if not os.path.exists(self.dn): os.mkdir(self.dn)
+        fp = open(self.lf,'w')
+        fp.write(str(datetime.datetime.now().isoformat()))
+        fp.close()
+        return self.lf
+    def __exit__(self, type, value, traceback):
+        if (value): 
+            # assuming we have an error we do not unlink
+            return
+        os.unlink(self.lf)
+        #self.cr.restore()
+
+def etckeeper_pull(repo='/etc',hostname=None,commit=True):
+    with lck('etckeeper_pull'):
+        if not hostname: hostname=env.host_string
+        if commit: 
+            with cd(repo):
+                ch = [ln for ln in run('git status --porcelain').split('\n') if ln!='']
+                if len(ch):
+                    run('etckeeper commit etckeeper_pull')
+        hdir = os.path.join('conf_repo/etckeeper',hostname)
+        local('mkdir -p %s'%hdir)
+        ldir = os.path.basename(repo)
+        with lcd(hdir):
+            #raise Exception('dir %s, am in %s'%(ldir,hdir))
+            if not os.path.exists(os.path.join(hdir,ldir)):
+                #raise Exception(hdir,ldir,os.path.exists(ldir))
+
+                local('git clone %s:%s %s'%(hostname,repo,ldir))
+            with lcd(ldir):
+                local('git pull origin master')
+
+def etckeeper_pull_nodes():
+    n = _lst(display=False)
+    for nn in n:
+        #nip = n[nn]['virt_ip']
+        nip = nn+'.'+DEFAULT_SEARCH #n[nn]['virt_ip']
+        execute(etckeeper_pull,host=nip,hostname=nip)
+
+def etckeeper_changes(repo='/etc'):
+    with cd(repo):
+        run('git status --porc | wc -l')
+
+
+def boot_purge_old_images():
+    run('''dpkg -l linux-image-\* | grep ^ii | awk '{print $2}' | egrep -v "$(uname -r)" | egrep -v "linux-image-generic" | xargs dpkg --purge''')
