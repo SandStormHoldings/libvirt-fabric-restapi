@@ -1648,7 +1648,7 @@ def ceph_install(apt=True):
     run("wget -q -O- 'https://download.ceph.com/keys/release.asc' | sudo apt-key add -")
     run("echo deb https://download.ceph.com/debian/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list")
     run('apt-get -q update')
-    run('apt-get install -y ceph-deploy ntp')
+    run('apt-get install -y ceph-deploy ntp rbd-nbd')
 
     # from here on, we are walking according to http://docs.ceph.com/docs/master/start/quick-ceph-deploy/
 
@@ -1665,10 +1665,11 @@ def openattic_install():
     for r in rows:
         append('/etc/apt/sources.list.d/openattic.list',r)
     cmds=["apt-get update",
-          "apt-get install openattic",
+          "apt-get install -y openattic",
           "systemctl enable lvm2-lvmetad.socket",
           "systemctl start lvm2-lvmetad.socket"]
-    for cmd in cmds: run(cmd)
+    with shell_env(DEBIAN_FRONTEND='noninteractive'):
+        for cmd in cmds: run(cmd)
 
 ps = {'p':'primary','s':'secondary'}
 
@@ -1991,4 +1992,33 @@ def etckeeper_changes(repo='/etc'):
 
 
 def boot_purge_old_images():
+    """get rid of old linux images in /boot if it fills up"""
     run('''dpkg -l linux-image-\* | grep ^ii | awk '{print $2}' | egrep -v "$(uname -r)" | egrep -v "linux-image-generic" | xargs dpkg --purge''')
+
+# the following are test data write and retrieval routines meant as tests for data corruption.
+DEFAULT_SEQLEN=17503
+def test_data_install():
+    put('node-confs/tests/data/genrand.py','/tmp/genrand.py')
+
+def test_data_write(pth,i,put_=False,seqlen=DEFAULT_SEQLEN):
+    if put_: test_data_install()
+    run('python /tmp/genrand.py %s %s > %s/%s'%(i,seqlen,pth,i))
+
+def test_data_writerange(pth,ifr=0,ito=20,put_=True,seqlen=DEFAULT_SEQLEN):
+    if put_: test_data_install()
+    c = ifr
+    while c < ito:
+        test_data_write(pth,c,put_=False,seqlen=seqlen)
+        c+=1
+
+def test_data_read(pth,i,put_=False,seqlen=DEFAULT_SEQLEN):
+    if put_: test_data_install()
+    op = run('''[[ "$(python /tmp/genrand.py %s %s | md5sum | awk '{print $1}')" == "$(md5sum %s/%s | awk '{print $1}')" ]] || echo "UNEQUAL %s"'''%(i,seqlen,pth,i,i))
+    if 'UNEQUAL' in op: raise Exception('bad result')
+
+def test_data_readrange(pth,ifr=0,ito=20,put_=True,seqlen=DEFAULT_SEQLEN):
+    if put_: test_data_install()
+    c = ifr
+    while c < ito:
+        test_data_read(pth,c,False,seqlen)
+        c+=1
