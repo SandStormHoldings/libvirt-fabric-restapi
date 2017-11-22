@@ -8,11 +8,10 @@ IMG="$4"
 [[ $ADMHOST != "" ]] || { echo "must include admin host" ; exit 1; }
 [[ $IMG != "" ]] || { echo "must include image, e.g ubuntu-16.04-large.img" ; exit 1; }
 echo '###### COMMENCING'
-(for H in $(fab getrole:ceph | egrep -v '^Done' | egrep -v '^$') ; do 
+(for H in $(fab getrole:ceph | cut -f1 -d '.' | egrep -v '^Done' | egrep -v '^$') ; do 
     fab -H $HYPERV undefine:$H,$HYPERV ; 
     fab -H $HYPERV destroy:$H ; 
     fab -H $HYPERV create_node:$H,$IMG,2524288
-    echo "HOST:"$H
 done) \
  &&
 echo '###### INSTALLING SSH KEYS' &&
@@ -51,5 +50,9 @@ echo '###### all done?'
 # here's how you migrate:
 # fab -H $ADMHOST migrate:vasja,$DSTHOST,nocopy=1,changesecret=1
 
+# create a snapshot of our template to be able to clone from
+# rbd snap create libvirt-pool/ubuntu@1
+# rbd snap protect libvirt-pool/ubuntu@1
+
 # setup a new virt
-# fab -H $NEWHOST create_node_rbd:vasja,$ADMHOST
+# fab -H $NEWHOST create_node_rbd:vasja,$ADMHOST,image_clone=libvirt-pool/ubuntu@1
