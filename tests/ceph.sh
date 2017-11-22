@@ -3,10 +3,11 @@ HYPERV="$1"
 ROLE="$2"
 ADMHOST="$3"
 IMG="$4"
-[[ $HYPERV != "" ]] || (echo "must include hypervisor host on which to deploy" ; exit 1)
-[[ $ROLE != "" ]] || (echo "must include role. e.g ceph" ; exit 1)
-[[ $ADMHOST != "" ]] || (echo "must include admin host" ; exit 1)
-[[ $IMG != "" ]] || (echo "must include image, e.g ubuntu-16.04-large.img" ; exit 1)
+[[ $HYPERV != "" ]] || { echo "must include hypervisor host on which to deploy" ; exit 1; }
+[[ $ROLE != "" ]] || { echo "must include role. e.g ceph" ; exit 1; }
+[[ $ADMHOST != "" ]] || { echo "must include admin host" ; exit 1; }
+[[ $IMG != "" ]] || { echo "must include image, e.g ubuntu-16.04-large.img" ; exit 1; }
+echo '###### COMMENCING'
 (for H in $(fab getrole:ceph | egrep -v '^Done' | egrep -v '^$') ; do 
     fab -H $HYPERV undefine:$H,$HYPERV ; 
     fab -H $HYPERV destroy:$H ; 
