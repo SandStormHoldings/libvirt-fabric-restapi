@@ -49,6 +49,10 @@ import os
 #NETWORKING_RESTART_CMD='/etc/init.d/networking restart' #12.04
 NETWORKING_RESTART_CMD='ifdown br0 && ifup br0' #14.04
 
+def getrole(role):
+    for h in env.roledefs[role]:
+        print(h)
+
 @parallel
 def iptables_allow_gw_subnet_ssh():
     netw = ".".join(DEFAULT_GATEWAY.split(".")[0:3]+['0']) + '/24'
@@ -75,6 +79,12 @@ def internal_network_pings():
     for h,ip in list(VLAN_GATEWAYS.items()):
         run('ping -q -c1 %s #pinging %s'%(ip,h))
 
+@parallel
+def ssh_connect_group(group,opts='-o StrictHostKeyChecking=no'):
+    for h in env.roledefs[group]:
+        print(env.host_string,'=>',h)
+        run('ssh %s %s hostname'%(opts,h))
+        #fab -H ceph-test1.dev.lan -- ssh -o StrictHostKeyChecking=no ceph-test2
 @parallel
 def network_restart():
     run(NETWORKING_RESTART_CMD+ ' ; ip a show br0')
@@ -299,6 +309,7 @@ def setup_dhcpd():
                 run('service isc-dhcp-server restart')
 
 
+
 @parallel
 def install_xsltproc():
     run('sudo apt-get -q -y install xsltproc libxml-xpath-perl')
@@ -328,8 +339,8 @@ def install_ssh_config():
     for kfn in SSH_KEYNAMES:
         put_ssh_privkey(kfn)
 
-@parallel
-def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=False):
+#@parallel
+def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=False,runbraddcmd=True,dhcpd=True,network=True):
     if apt_update or not fabric.contrib.files.exists('/var/cache/apt/pkgcache.bin'): run('sudo apt-get -q update')
     #install kvm
     run('sudo apt-get -q -y install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils isc-dhcp-server zile pigz tcpdump pv sendemail sysstat htop iftop nload xmlstarlet ncdu mosh')
@@ -349,9 +360,9 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
     if stop_before_network: 
         print('STOPPING BEFORE NETWORK CONFIG') 
         return
-    setup_network(snmpd_network)
+    if network: setup_network(snmpd_network,runbraddcmd=runbraddcmd)
     setup_port_forwarding()
-    setup_dhcpd()
+    if dhcpd: setup_dhcpd()
     install_xsltproc()
 
     #this works for a host machine:
@@ -377,7 +388,7 @@ def setup_port_forwarding():
     if os.path.exists(myipt):
         put(myipt,'/etc/iptables.sh')
 @parallel
-def destroy(node):
+def destroy(node,target=None):
     rt=run('virsh destroy %s ||:'%node)
     return rt
 
@@ -457,10 +468,11 @@ def undefine(node, target, del_image=True):
     srcfn = os.path.join('dhcpd-confs', '%s.conf' % target)
     src_lines = []
     pattern = ' of ' + node + ' ['
-    with open(srcfn, 'r') as infile:
-        for line in infile:
-            if pattern in line:
-                src_lines.append(line)
+    if os.path.exists(srcfn):
+        with open(srcfn, 'r') as infile:
+            for line in infile:
+                if pattern in line:
+                    src_lines.append(line)
     if src_lines:  # node was migrated
         assert len(src_lines) == 1,\
                "should be one and only %s in %s" % (node, srcfn)
@@ -472,14 +484,14 @@ def undefine(node, target, del_image=True):
     return rt
 
 
-def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False):
+def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False,changesecret=False):
     #find out where image_name resides
     if not src_host or not mac_addr:
         alst = _lst(al=True)
         rt = alst[image_name]
-        assert rt,"could not find %s,\n%s" % (image_name, rt)
+        assert rt,"could not find %s,\n%s \n%s \n%s" % (image_name, rt, dest_host,src_host)
         src_host = rt['host']
-        mac_addr = rt['mac']
+        mac_addr = rt.get('mac')
         if rt['state'] == 'running':
             with settings(host_string=src_host):
                 run('virsh destroy %s' % image_name)
@@ -487,7 +499,8 @@ def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False):
         rt={'host': dest_host,
             'mac': mac_addr,
             'name': image_name}
-    dhcp_move(src_host, dest_host, mac_addr, image_name, setup=True)
+    if mac_addr:
+        dhcp_move(src_host, dest_host, mac_addr, image_name, setup=True)
     #run on source
     try:
         xml_node_description = '/tmp/' + uuid.uuid4().hex
@@ -531,6 +544,10 @@ def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False):
 
         with settings(host_string=dest_host):
             run('virsh define /tmp/%s.xml' % image_name)
+            if changesecret:
+                uuids = virsh_secret_define()
+                cmd="""EDITOR="sed -i -E "'"'"s/<secret type='ceph' uuid='(.*)'\//<secret type='ceph' uuid='%s'\//g"'"'"" virsh edit %s"""%(uuids,image_name)
+                run(cmd)
         with settings(host_string=src_host):
             run('virsh undefine %s' % image_name)
             if not nocopy: run('rm /var/lib/libvirt/images/%(image_name)s.img.gz' % {'image_name': image_name})
@@ -615,14 +632,21 @@ def create_node(node_name,
                 memory=DEFAULT_RAM, 
                 vcpu=DEFAULT_VCPU, 
                 configure=True,
-                simulate=False):
-    tplfn = os.path.join('/var/lib/libvirt/images',template_name)
+                simulate=False,
+                xml_tpl='node-tpl.xml',
+                args={},
+                ):
+    if template_name:
+        tplfn = os.path.join('/var/lib/libvirt/images',template_name)
+    else:
+        tplfn = None
     nodefn = os.path.join('/var/lib/libvirt/images','%s.img'%node_name)
-    assert fabric.contrib.files.exists(tplfn),"%s does not exist"%tplfn
+    if tplfn:
+        assert fabric.contrib.files.exists(tplfn),"%s does not exist"%tplfn
     assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
     ns = uuid.NAMESPACE_DNS
     print('about to create uuid for node with ns %s, node name %s' % (ns, node_name.encode('utf-8')))
-    uuidi = uuid.uuid5(namespace=ns, name=node_name)
+    uuidi = uuid.uuid5(namespace=ns, name=node_name) #.encode('utf-8')
     variables = {
         'uuid':str(uuidi),
         'name':node_name,
@@ -632,13 +656,17 @@ def create_node(node_name,
         'vcpu': vcpu,
         'imgfmt':IMAGE_FORMAT,
         'simulate':simulate,
+        'brint':'br0',
     }
+    for k,v in args.items(): variables[k]=v
+
     if simulate=='1': return variables
 
-    run('cp %s %s'%(tplfn,nodefn))
+    if tplfn:
+        run('cp %s %s'%(tplfn,nodefn))
     if simulate=='2': return variables
 
-    upload_template('server-confs/node-tpl.xml','/tmp/%s.xml'%node_name,variables)
+    upload_template(os.path.join('server-confs',xml_tpl),'/tmp/%s.xml'%node_name,variables)
     if simulate=='3': return variables
     run('virsh define /tmp/%s.xml'%node_name)
     if simulate=='4': return variables
@@ -649,6 +677,50 @@ def create_node(node_name,
         if simulate=='5': return variables
     return rt
 
+def virsh_secret_define():
+    put('node-confs/secret.xml','/tmp/secret.xml')
+    with settings(warn_only=True):
+        op = run('virsh secret-define --file /tmp/secret.xml')
+        if 'already defined for use with client.libvirt' in op:
+            uuid = re.compile('([0-9a-f\-]+) already defined for use with client.libvirt').search(op).group(1)
+        else:
+            uuid = re.compile('Secret ([0-9a-f\-]+) created').search(op).group(1)
+    run('ceph auth get-key client.libvirt | tee /tmp/client.libvirt.key')
+    run('virsh secret-set-value --secret %s --base64 $(cat /tmp/client.libvirt.key) && rm /tmp/client.libvirt.key /tmp/secret.xml'%uuid)
+    print('UUID',uuid)
+    return uuid
+
+def create_node_rbd(node_name,
+                    monitor_host,
+                    memory=DEFAULT_RAM,
+                    vcpu=DEFAULT_VCPU,
+                    configure=True,
+                    simulate=False,
+                    image_clone=None,
+                    image_size='2G',
+                    pool='libvirt-pool',
+                    **kwargs
+                    ):
+
+    uuid = virsh_secret_define()
+    eargs = {'pool':pool,
+             'monitor-host':monitor_host,
+             'secret-uuid':uuid}
+    for kw in kwargs:
+        eargs[kw]=kwargs[kw]
+    if image_clone:
+        run('rbd clone %s %s/%s'%(image_clone,pool,node_name))
+    else:
+        run('qemu-img create -f rbd rbd:%s/%s %s'%(pool,node_name,image_size))
+    create_node(node_name,
+                template_name=None,
+                memory=memory,
+                vcpu=vcpu,
+                configure=configure,
+                simulate=simulate,
+                xml_tpl='node-rbd-tpl.xml',
+                args=eargs
+                )
 def macaddr_by_nodename(name):
     macaddr = run("""virsh dumpxml %s | xpath -q -e '/domain/devices/interface/mac/@address' | cut -f2 -d'"'"""%name).strip()
     return macaddr
@@ -1586,6 +1658,7 @@ def install_ipt(myipt=None):
     if exists('/etc/iptables.sh'):
         run('chmod +x /etc/iptables.sh')
         put('server-confs/host-rc.local','/etc/rc.local')
+        run('chmod +x /etc/rc.local')
         run('/etc/rc.local')
     
 # example: fab -R kvm install_snmpd:10.98.0.0/16
@@ -1646,10 +1719,53 @@ def ceph_install(apt=True):
     run("wget -q -O- 'https://download.ceph.com/keys/release.asc' | sudo apt-key add -")
     run("echo deb https://download.ceph.com/debian/ $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/ceph.list")
     run('apt-get -q update')
-    run('apt-get install -y ceph-deploy ntp')
+    run('apt-get install -y ceph-deploy ntp rbd-nbd ceph-common')
 
     # from here on, we are walking according to http://docs.ceph.com/docs/master/start/quick-ceph-deploy/
 
+def ceph_deploy_new(rdir):
+    assert not exists(rdir)
+    run('mkdir -p %s'%rdir)
+    with cd(rdir):
+        run('ceph-deploy new %s'%env.host_string)
+
+def ceph_deploy_install():
+    run('ceph-deploy install %s'%env.host_string)
+
+def ceph_deploy_osd_prepare(admhost,rdir,dev):
+    with cd(rdir):
+        execute(run,
+                'ceph-deploy osd prepare %s:%s'%(env.host_string,dev),
+                host=admhost,
+                )
+
+def ceph_deploy_admin(admhost,rdir):
+    with cd(rdir):
+        execute(run,
+                'ceph-deploy admin %s'%env.host_string,
+                host=admhost)
+
+def ceph_deploy_monitor(rdir):
+    with cd(rdir):
+        run('ceph-deploy mon create-initial')
+
+
+def ceph_setup_cluster(rdir):
+    pass
+
+def ceph_fix_loop_journal_symlink(ldev='/dev/mapper/loop0p2'):
+    lds = [r for r in run('find /var/lib/ceph/osd/ -type l -xtype l').split('\n') if r!='']
+    if len(lds)==1:
+        with cd('/'.join(lds[0].split('/')[0:-1])):
+            assert exists(ldev)
+            run('rm journal && ln -s %s journal'%ldev)
+    run('service ceph restart')
+
+
+
+def ceph_setup_libvirt():
+    run('ceph osd pool create libvirt-pool 128 128')
+    run("""ceph auth get-or-create client.libvirt mon 'allow r' osd 'allow class-read object_prefix rbd_children, allow rwx pool=libvirt-pool'""")
 
 def openattic_install():
     assert run('lsb_release -c -s')=='xenial'
@@ -1663,14 +1779,51 @@ def openattic_install():
     for r in rows:
         append('/etc/apt/sources.list.d/openattic.list',r)
     cmds=["apt-get update",
-          "apt-get install openattic",
+          "apt-get install -y openattic",
           "systemctl enable lvm2-lvmetad.socket",
           "systemctl start lvm2-lvmetad.socket"]
-    for cmd in cmds: run(cmd)
+    with shell_env(DEBIAN_FRONTEND='noninteractive'):
+        for cmd in cmds: run(cmd)
+
+def losetup(losetups):
+    upload_template('server-confs/losetup.sh',
+                    '/etc/losetup.sh')
+    for lst in losetups:
+        append('/etc/losetup.sh',lst)
+    run('chmod +x /etc/losetup.sh')
+
+def loop_create(imgloc,size,dev):
+    run('apt-get install -q -y kpartx')
+    assert dev.startswith('/dev/loop')
+    ex = loops_get()
+    if dev in ex:
+        assert ex[dev]['image']==imgloc
+    if not exists(imgloc):
+        run('truncate -s %s %s'%(size,imgloc))
+    lcmd = 'losetup %s %s'%(dev,imgloc)
+    lcmd2 = 'kpartx -av %s'%dev
+    append('/etc/losetup.sh',lcmd)
+    append('/etc/losetup.sh',lcmd2)
+    if not (dev in ex and ex[dev]['image']==imgloc):
+        run(lcmd)
+    run('chmod +x /etc/losetup.sh')
+    install_ipt()
+    run(lcmd2)
+
+def loops_get():
+    lss = [ln.strip() for ln in run('losetup -a').split("\n") if ln!='']
+    exloops = {}
+    for ls in lss:
+        lsre = re.compile('^(?P<devname>[^ \:]+): (?P<numbers>[^ ]+) \((?P<image>.+)(?P<deleted>| \(deleted\))\)$')
+        #raise Exception(ls)
+        lsp = lsre.search(ls.strip())
+
+        exloops[lsp.group('devname')] = lsp.groupdict()
+    return exloops
 
 ps = {'p':'primary','s':'secondary'}
 
-def drbd_setup(apt=False,create_md=False):
+def drbd_setup(apt=False,create_md=False,test_failover=True,force_primary=True):
     # drbd protocol versions by ubuntu release:
     # 14.04: version: 8.4.3 (api:1/proto:86-101)
     # 16.04: version: 8.4.5 (api:1/proto:86-101)
@@ -1740,10 +1893,8 @@ def drbd_setup(apt=False,create_md=False):
                         a)
         #raise Exception(a['role'])
 
-    upload_template('server-confs/losetup.sh',
-                    '/etc/losetup.sh',
-                    {'losetups':"\n".join(losetups)})
-    run('chmod +x /etc/losetup.sh')
+    losetup(losetups)
+
     for a in actions:
         imgdir = '/var/lib/libvirt/images/'
         fn = os.path.join(imgdir,a['name'])
@@ -1775,15 +1926,7 @@ def drbd_setup(apt=False,create_md=False):
 
         #run('drbdadm create-md %s'%a['name'])
     install_ipt()
-    lss = run('losetup -a').split("\n")
-    exloops = {}
-    for ls in lss:
-        lsre = re.compile('^(?P<devname>[^ \:]+): (?P<numbers>[^ ]+) \((?P<image>.+)(?P<deleted>| \(deleted\))\)$')
-        #raise Exception(ls)
-        lsp = lsre.search(ls.strip())
-        assert lsp.group('devname') not in exloops,lsp.group('devname')
-        exloops[lsp.group('devname')] = lsp.groupdict()
-    
+    exloops = loops_get()
     # kick start the thing
     run('service drbd restart')
 
@@ -1807,23 +1950,45 @@ def drbd_setup(apt=False,create_md=False):
 
         if a['role']=='primary' and create_md:
 
-            run('drbdadm primary --force %s'%resource)
+            run('drbdadm primary %s %s'%((force_primary and '--force' or ''),resource))
             # get on with lvm
             run('pvcreate /dev/%s'%drbd)
             run('vgcreate %s /dev/%s'%(resource,drbd))
             run('lvcreate -l 100%FREE '+resource)
-            run('mkfs.ext4 -m0 %s'%dev)
+            if force_primary:
+                run('mkfs.ext4 -m0 %s'%dev)
             run('mount %s'%mountpoint)
 
+def drbd_failover_test(resource,target,overwrite=False):
+        # make sure that failover is indeed working
+        execute(drbd_failover,
+                resource=resource,
+                target=target,
+                deactivate=True,
+                activate=True,
+                recreate=overwrite, # this is for some reason required during the first migration
+                host=env.host_string)
+        # and back
+        execute(drbd_failover,
+                resource=resource,
+                target=env.host_string,
+                deactivate=True,
+                activate=True,
+                recreate=False, # this is for some reason required during the first migration
+                host=target)
+
+
 def drbd_failover(resource,target,deactivate=True,activate=True,recreate=False):
+    tgtrole=None ; srcrole=None
     source = env.host_string
     res = DRBD_RESOURCES[resource]
     for role in ps.values():
+        #print('role',role,'val',res[role],'tgt',target,'src',source)
         if res[role]==target:
             tgtrole=role
         elif res[role]==source:
             srcrole=role
-    assert tgtrole and srcrole
+    assert tgtrole and srcrole,"%s -> %s (%s)"%(srcrole,tgtrole,env.host_string)
 
     tgt_drbd=execute(run,
                      "egrep -A5 drbd-test2.dev.lan '/etc/drbd.d/kvm-test.res'   | egrep 'device ' | awk '{print $2}' | sed 's/;$//'",
@@ -1908,4 +2073,106 @@ def mailcow_install():
           'apt-get install -y git',
           'git clone https://github.com/mailcow/mailcow-dockerized',
     ]
+
+def etckeeper_install():
+    run('apt-get install -q -y git etckeeper')
+    run('git config --global user.email "root@%s.%s"'%(env.host_string,DEFAULT_SEARCH))
+    run('git config --global user.name "root"')
+    if not exists('/etc/.git'):
+        comment('/etc/etckeeper/etckeeper.conf','VCS="bzr"')
+        append('/etc/etckeeper/etckeeper.conf','VCS="git"')
+        with cd('/etc/'):
+            run('etckeeper init')
+            run('etckeeper commit initial')
+        #raise Exception('git repo not present in /etc')
+
+def etckeeper_install_nodes():
+    n = _lst(display=False)
+    for nn in n:
+        nip = nn+'.'+DEFAULT_SEARCH #n[nn]['virt_ip']
+        execute(etckeeper_install,host=nip)
+
+class lck():
+    def __init__(self, cr):
+        self.h = env.host_string
+        self.cr = cr
+        self.dn = os.path.join('lck',self.h)
+        self.lf = os.path.join(self.dn,self.cr+'.lock')
+    def __enter__(self):
+
+        if not os.path.exists(self.dn): os.mkdir(self.dn)
+        fp = open(self.lf,'w')
+        fp.write(str(datetime.datetime.now().isoformat()))
+        fp.close()
+        return self.lf
+    def __exit__(self, type, value, traceback):
+        if (value): 
+            # assuming we have an error we do not unlink
+            return
+        os.unlink(self.lf)
+        #self.cr.restore()
+
+def etckeeper_pull(repo='/etc',hostname=None,commit=True):
+    with lck('etckeeper_pull'):
+        if not hostname: hostname=env.host_string
+        if commit: 
+            with cd(repo):
+                ch = [ln for ln in run('git status --porcelain').split('\n') if ln!='']
+                if len(ch):
+                    run('etckeeper commit etckeeper_pull')
+        hdir = os.path.join('conf_repo/etckeeper',hostname)
+        local('mkdir -p %s'%hdir)
+        ldir = os.path.basename(repo)
+        with lcd(hdir):
+            #raise Exception('dir %s, am in %s'%(ldir,hdir))
+            if not os.path.exists(os.path.join(hdir,ldir)):
+                #raise Exception(hdir,ldir,os.path.exists(ldir))
+
+                local('git clone %s:%s %s'%(hostname,repo,ldir))
+            with lcd(ldir):
+                local('git pull origin master')
+
+def etckeeper_pull_nodes():
+    n = _lst(display=False)
+    for nn in n:
+        #nip = n[nn]['virt_ip']
+        nip = nn+'.'+DEFAULT_SEARCH #n[nn]['virt_ip']
+        execute(etckeeper_pull,host=nip,hostname=nip)
+
+def etckeeper_changes(repo='/etc'):
+    with cd(repo):
+        run('git status --porc | wc -l')
+
+
+def boot_purge_old_images():
+    """get rid of old linux images in /boot if it fills up"""
+    run('''dpkg -l linux-image-\* | grep ^ii | awk '{print $2}' | egrep -v "$(uname -r)" | egrep -v "linux-image-generic" | xargs dpkg --purge''')
+
+# the following are test data write and retrieval routines meant as tests for data corruption.
+DEFAULT_SEQLEN=17503
+def test_data_install():
+    put('node-confs/tests/data/genrand.py','/tmp/genrand.py')
+
+def test_data_write(pth,i,put_=False,seqlen=DEFAULT_SEQLEN):
+    if put_: test_data_install()
+    run('python /tmp/genrand.py %s %s > %s/%s'%(i,seqlen,pth,i))
+
+def test_data_writerange(pth,ifr=0,ito=20,put_=True,seqlen=DEFAULT_SEQLEN):
+    if put_: test_data_install()
+    c = int(ifr)
+    while c < int(ito):
+        test_data_write(pth,c,put_=False,seqlen=seqlen)
+        c+=1
+
+def test_data_read(pth,i,put_=False,seqlen=DEFAULT_SEQLEN):
+    if put_: test_data_install()
+    op = run('''[[ "$(python /tmp/genrand.py %s %s | md5sum | awk '{print $1}')" == "$(md5sum %s/%s | awk '{print $1}')" ]] || echo "UNEQUAL %s"'''%(i,seqlen,pth,i,i))
+    if 'UNEQUAL' in op: raise Exception('bad result')
+
+def test_data_readrange(pth,ifr=0,ito=20,put_=True,seqlen=DEFAULT_SEQLEN):
+    if put_: test_data_install()
+    c = int(ifr)
+    while c < int(ito):
+        test_data_read(pth,c,False,seqlen)
+        c+=1
 
