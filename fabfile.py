@@ -1900,3 +1900,12 @@ def postfix_install():
     run('apt-get install -y postfix ca-certificates') #postfix:no-configuration
     for fn in ['/etc/postfix/main.cf']:
         put(os.path.join('conf_repo/node-configs/%s'%env.host_string,fn),fn)
+
+def mailcow_install():
+    cmds=['curl -sSL https://get.docker.com/ | sh',
+          'curl -L https://github.com/docker/compose/releases/download/$(curl -Ls https://www.servercow.de/docker-compose/latest.php)/docker-compose-$(uname -s)-$(uname -m) > /usr/local/bin/docker-compose',
+          'chmod +x /usr/local/bin/docker-compose',
+          'apt-get install -y git',
+          'git clone https://github.com/mailcow/mailcow-dockerized',
+    ]
+
