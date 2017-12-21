@@ -1,2 +1,1 @@
-#!/bin/sh -e
-%(floating_ips)s
+../conf_repo/server-confs/rc.local

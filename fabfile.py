@@ -31,7 +31,7 @@ from fabric.contrib.files import exists, contains,append, comment, upload_templa
 from fabric.context_managers import nested, shell_env
 import fabric.contrib.files
 
-from config import (HOSTS, VLAN_GATEWAYS, VLAN_RANGES, FLOATING_IPS,IPV6,DEFAULT_GATEWAY,HOST_GATEWAYS,
+from config import (HOSTS, VLAN_GATEWAYS, INTERNAL_GATEWAYS, VLAN_RANGES, FLOATING_IPS,IPV6,DEFAULT_GATEWAY,HOST_GATEWAYS,
                     DEFAULT_RAM, DEFAULT_VCPU, OVPN_HOST, main_network, ovpn_client_network,ovpn_internal_addr,ssh_passwords,
                     ovpn_client_netmask, DIGEST_REALM, SECRET_KEY, IMAGES, LOWERED_PRIVILEGES, snmpd_network, OVPN_KEY_SENDER, JUMPHOST_EXTERNAL_IP, DEFAULT_SEARCH, DNS_HOST, OVPN_KEYDIR,FORWARDED_PORTS,
                     SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT
@@ -43,7 +43,7 @@ env.passwords=ssh_passwords
 #make sure that key config settings are assigned
 assert main_network and ovpn_client_network and ovpn_client_netmask,"%s , %s , %s"%(main_network, ovpn_client_network, ovpn_client_netmask)
 assert DIGEST_REALM and SECRET_KEY
-assert IMAGES
+assert type(IMAGES)==dict
 
 import os
 #NETWORKING_RESTART_CMD='/etc/init.d/networking restart' #12.04
@@ -235,6 +235,7 @@ def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbrad
     #raise Exception('main_ip for',env.host_string,'is',main_ip)
     varss = {'main_ip':main_ip,
              'ovpn_internal_addr':ovpn_internal_addr,
+             'internal_gateway':INTERNAL_GATEWAYS[env.host_string],
              'ovpn_client_network':ovpn_client_network,
              'gateway':gw,
              'main_ipv6_ip':IPV6.get(env.host_string),
@@ -243,6 +244,7 @@ def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbrad
              'vlan_bcast': main_network+'.0.255',
              'my_floating_ips':apnd,
              'extra':'',}
+
     badaddr = '.'.join(ovpn_internal_addr.split('.')[0:2])
     assert not main_ip.startswith(badaddr),"achtung - setting main ip to internal addr %s"%main_ip
     with cd('/etc/network'):
@@ -301,7 +303,7 @@ def setup_dhcpd():
 
 
     with cd('/etc/dhcp/'):
-        put(source_tpl,'dhcpd.conf.install',base_vars)
+        upload_template(source_tpl,'dhcpd.conf.install',base_vars)
         with settings(warn_only=True):
             if run('diff /etc/dhcp/dhcpd.conf.install /etc/dhcp/dhcpd.conf'):
                 run('cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.backup')
@@ -332,8 +334,12 @@ def put_ssh_privkey(kfn,force_put=False,rkfnn=None):
 def install_ssh_config():
     if not env.host_string in LOWERED_PRIVILEGES:
         if not fabric.contrib.files.exists('./.ssh/ssh_config'):
-            sshc = open('ssh_config','r').read().replace(' %s'%SSH_HOST_KEYNAME,' ~/.ssh/%s'%SSH_HOST_KEYNAME).replace(' %s'%SSH_VIRT_KEYNAME,' ~/.ssh/%s'%SSH_VIRT_KEYNAME)
-            unc = io.BytesIO(sshc)
+            sshc = str(open('ssh_config','r').read())\
+                                         .replace(' %s'%SSH_HOST_KEYNAME,' ~/.ssh/%s'%SSH_HOST_KEYNAME)\
+                                         .replace(' %s'%SSH_VIRT_KEYNAME,' ~/.ssh/%s'%SSH_VIRT_KEYNAME)
+            #print('contents:',sshc)
+            #print('type:',type(sshc))
+            unc = io.BytesIO(bytearray(sshc,'utf-8'))
             put(unc,'.ssh/config')
 
     for kfn in SSH_KEYNAMES:
@@ -628,7 +634,7 @@ def new_mac():
 
 
 def create_node(node_name,
-                template_name=list(IMAGES.items())[0][0],
+                template_name=None,
                 memory=DEFAULT_RAM, 
                 vcpu=DEFAULT_VCPU, 
                 configure=True,
@@ -636,6 +642,8 @@ def create_node(node_name,
                 xml_tpl='node-tpl.xml',
                 args={},
                 ):
+    if not template_name and IMAGES:
+        template_name = list(IMAGES.items())[0][0]
     if template_name:
         tplfn = os.path.join('/var/lib/libvirt/images',template_name)
     else:
@@ -1657,7 +1665,10 @@ def install_ipt(myipt=None):
         put(myipt,'/etc/iptables.sh')
     if exists('/etc/iptables.sh'):
         run('chmod +x /etc/iptables.sh')
-        put('server-confs/host-rc.local','/etc/rc.local')
+        upload_template('server-confs/rc.local',
+                        '/etc/rc.local',
+                        {'vlan_gateway':VLAN_GATEWAYS[env.host_string]}
+                        )
         run('chmod +x /etc/rc.local')
         run('/etc/rc.local')
     

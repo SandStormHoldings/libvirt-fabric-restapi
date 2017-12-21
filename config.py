@@ -21,13 +21,14 @@ main_network = None
 hostre = re.compile('^([\s]*)Host (.+)')
 ipre = re.compile('^([\s]*)HostName (.+)')
 confcont = open(env.ssh_config_path,'r').read().split("\n")
-hosts = [r.group(2) for r in filter(lambda x: x,[ipre.search(r) for r in confcont])]
-ips = [r.group(2) for r in filter(lambda x: x,[hostre.search(r) for r in confcont])]
+hosts = [r.group(2).strip() for r in filter(lambda x: x,[ipre.search(r) for r in confcont])]
+ips = [r.group(2).strip() for r in filter(lambda x: x,[hostre.search(r) for r in confcont])]
 # parsed dictionary from ssh config includes hosts and their ips 
 HOSTS = dict(list(zip(ips,hosts)))
 
 zero_offset=30
 gate = lambda x: '%s.%s.1' % (main_network, x and x or zero_offset-x)
+internal_gate = lambda x: '%s.%s.2' % (main_network, x and x or zero_offset-x)
 netrange = lambda x, y: '%s.%s.2 %s.%s.254' % (main_network, x and x or zero_offset-x, main_network, y)
 
 # default starting parameters for newly created virtual machines
@@ -93,7 +94,7 @@ except ImportError:
 assert len(FLOATING_IPS)== len(set([k[2] for k in FLOATING_IPS])),"external ips not unique"
 assert len(FLOATING_IPS)== len(set([k[1] for k in FLOATING_IPS])),"more than a single floating ip per-host?" 
 
-VLAN_GATEWAYS={} ; VLAN_RANGES={} ; HOST_IDX={}
+VLAN_GATEWAYS={} ; INTERNAL_GATEWAYS={} ; VLAN_RANGES={} ; HOST_IDX={}
 for ip in [ip for ip in ips if HOST_PREFIX in ip]:
     try:
         i = int(ip.replace(HOST_PREFIX,''))
@@ -101,7 +102,8 @@ for ip in [ip for ip in ips if HOST_PREFIX in ip]:
         continue
     HOST_IDX[ip]=i
     VLAN_GATEWAYS[ip]=gate(i)
+    INTERNAL_GATEWAYS[ip]=internal_gate(i)
     VLAN_RANGES[ip]=netrange(i,i)
-
+    
 if __name__=='__main__' and len(sys.argv)>1:
     print(locals()[sys.argv[1]])

@@ -3,20 +3,21 @@ HYPERV="$1"
 ROLE="$2"
 ADMHOST="$3"
 IMG="$4"
+PRIVKEY='id_rsa-ceph'
 [[ $HYPERV != "" ]] || { echo "must include hypervisor host on which to deploy" ; exit 1; }
 [[ $ROLE != "" ]] || { echo "must include role. e.g ceph" ; exit 1; }
 [[ $ADMHOST != "" ]] || { echo "must include admin host" ; exit 1; }
 [[ $IMG != "" ]] || { echo "must include image, e.g ubuntu-16.04-large.img" ; exit 1; }
 echo '###### COMMENCING'
-(for H in $(fab getrole:ceph | cut -f1 -d '.' | egrep -v '^Done' | egrep -v '^$') ; do 
+(for H in $(fab getrole:$ROLE | cut -f1 -d '.' | egrep -v '^Done' | egrep -v '^$') ; do 
     fab -H $HYPERV undefine:$H,$HYPERV ; 
     fab -H $HYPERV destroy:$H ; 
     fab -H $HYPERV create_node:$H,$IMG,2524288
 done) \
  &&
 echo '###### INSTALLING SSH KEYS' &&
-fab -R "$ROLE" put_ssh_privkey:id_rsa-ceph,,id_rsa &&
-fab -R "$ROLE" authorized_keys_add:/root/.ssh/authorized_keys,conf_repo/id_rsa-ceph.pub &&
+fab -R "$ROLE" put_ssh_privkey:$PRIVKEY,,id_rsa &&
+fab -R "$ROLE" authorized_keys_add:/root/.ssh/authorized_keys,conf_repo/$PRIVKEY.pub &&
 echo '###### INSTALLING LIBVIRT' &&
 sleep 10 &&
 echo '###### INITIAL HOST LIBVIRT INSTALL' &&
