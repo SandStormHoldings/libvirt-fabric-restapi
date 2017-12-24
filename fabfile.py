@@ -43,7 +43,7 @@ env.passwords=ssh_passwords
 #make sure that key config settings are assigned
 assert main_network and ovpn_client_network and ovpn_client_netmask,"%s , %s , %s"%(main_network, ovpn_client_network, ovpn_client_netmask)
 assert DIGEST_REALM and SECRET_KEY
-assert type(IMAGES)==dict
+assert type(IMAGES)==dict,type(IMAGES)
 
 import os
 #NETWORKING_RESTART_CMD='/etc/init.d/networking restart' #12.04
@@ -966,6 +966,11 @@ def noop():
 def host_reboot():
     run('reboot')
 
+
+def fix_ifnames():
+    """return to old style ethX interface names"""
+    append('/etc/default/grub','GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"')
+    run('grub-mkconfig -o /boot/grub/grub.cfg')
 
 def setup_openvpn(node_name):
     ourhost = list_(al=True, display=False)[node_name]
