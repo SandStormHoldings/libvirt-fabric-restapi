@@ -364,14 +364,20 @@ def setup_port_forwarding():
     myipt = init_ipt()
     print('myipt is',myipt)
     if not env.host_string in FORWARDED_PORTS: return
+    cont = [ln.strip() for ln in open(myipt,'r').read().split("\n") if ln.strip()!='']
     for fp in FORWARDED_PORTS[env.host_string]:
         cmd = 'iptables -tnat -A PREROUTING -d %(endpoint_host)s/32 -p tcp -m tcp --dport %(endpoint_port)s -j DNAT --to-destination %(redirect_host)s:%(redirect_port)s'%fp
-        cont = [ln.strip() for ln in open(myipt,'r').read().split("\n") if ln.strip()!='']
         if cmd not in cont:
+            print('APPENDING, EXECUTING',cmd)
             cont.append(cmd)
             run(cmd) # execute immediately in case we can't find it in the file
-    fp = open(myipt,'w') ; fp.write("\n".join(cont)) ; fp.close()
+        else:
+            print(cmd,'ALREADY IN',myipt)
+    cwr = "\n".join(cont)
+    fp = open(myipt,'w') ; fp.write(cwr) ; fp.close()
+    print('WRITTEN LOCALLY',myipt)
     if os.path.exists(myipt):
+        print('UPLOADING as /etc/iptables.sh')
         put(myipt,'/etc/iptables.sh')
 @parallel
 def destroy(node):
@@ -1525,9 +1531,10 @@ def install_tasks(user='tasks',
         run('add-apt-repository    "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"')
         run('apt-get update')
         run('apt-get install -y -q docker-ce')
+    if fetch:
+        with settings(warn_only=True): run('adduser {user} --disabled-password --gecos ""'.format(user=user))
     with cd('/home/{user}'.format(user=user)):    
         if fetch:
-            with settings(warn_only=True): run('adduser {user} --disabled-password --gecos ""'.format(user=user))
             run('usermod -aG docker {user}'.format(user=user))
             if overwrite: run('rm -rf .git *') # get rid of the homedir entirely
             run('git clone https://github.com/SandStormHoldings/ScratchDocs')
