@@ -1055,6 +1055,12 @@ auto eth0:%(cnt)s
     with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % ourhost['virt_ip']):
         run('service openvpn restart')
 
+def setup_openvpn_xenial(apt=False):
+    if apt: run('apt-get update')
+    run('sudo apt-get install -y openvpn easy-rsa')
+    run('make-cadir /etc/openvpn-ca')
+    #with cd('/etc/openvpn-ca'):
+        
 def openvpn_status():
     op = run('cat /etc/openvpn/openvpn-status.log')
     rows = [r.strip().split(',') for r in op.split('\n')]
