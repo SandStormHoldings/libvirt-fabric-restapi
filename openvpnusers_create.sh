@@ -8,5 +8,5 @@ for LN in $(egrep -v '^#' conf_repo/openvpnusers.txt) ; do
 	continue
 	fi
     echo "$KN => $EM"
-    fab -H "$(cat conf_repo/openvpnhost.txt)" client_openvpn:openvpn,$KN,1,$EM
+    fab -H "$(cat conf_repo/openvpnhost.txt)" client_openvpn:$KN,1,$EM
     done

@@ -972,95 +972,44 @@ def fix_ifnames():
     append('/etc/default/grub','GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"')
     run('grub-mkconfig -o /boot/grub/grub.cfg')
 
-def setup_openvpn(node_name):
-    ourhost = list_(al=True, display=False)[node_name]
-    print(ourhost)
-    if ourhost['host'] != env.host_string:
-        return
+def setup_openvpn(restart=False,make_cadir=True):
 
-    #hackish but fuckit.
-    run('echo "nameserver 8.8.8.8" > /etc/resolv.conf')
-    # first of all!!
+    
+    ips = get_ips()
+
+    #run('echo "nameserver 8.8.8.8" > /etc/resolv.conf')
     run('sysctl -w net.ipv4.ip_forward=1')
     append('/etc/sysctl.conf','net.ipv4.ip_forward=1')
     
-    #1. assign any floating ips that need be on this machine
-    my_floating_ips = [x for x in FLOATING_IPS if x[1]==ourhost['virt_ip']]
+    if restart: run(NETWORKING_RESTART_CMD)
 
-    floating_ips_cont=''
-    tpl ="""
-auto eth0:%(cnt)s
-  iface eth0:%(cnt)s inet static
-  address %(floating_ip)s
-"""
-    cnt=0
-    for fip in my_floating_ips:
-        floating_ips_cont+=tpl%{'cnt':cnt,'floating_ip':fip[2]}
-        cnt+=1
-
-    vlan_gw = VLAN_GATEWAYS[env.host_string]
-    varss = {
-        'virt_ip': ourhost['virt_ip'],
-        'floating_ips':floating_ips_cont,
-        'gateway': vlan_gw}
-    
-    interfacestmp = '/tmp/interfaces-%s'%node_name
-    upload_template('node-confs/static-interfaces',
-                    interfacestmp,
-                    varss)
-    execute(run,'scp -o "StrictHostkeyChecking no" %s %s:/etc/network/interfaces'%(interfacestmp,ourhost['virt_ip']),host=ourhost['host'])
-    with settings(warn_only=True):
-        execute(run,\
-                ('ssh -o "StrictHostkeyChecking no" %(virt_ip)s '%ourhost)+NETWORKING_RESTART_CMD,host=ourhost['host'])
-
-    with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % ourhost['virt_ip']):
-        run("apt-get -y --force-yes install openvpn sendemail")
-        with cd('/etc/openvpn'):
-            if not exists('easy-rsa'): run('mkdir easy-rsa')
-            sdirs = ['/usr/share/doc/openvpn/examples/easy-rsa/2.0/','/usr/share/doc/openvpn/examples/sample-keys/',None]
-            for dd in sdirs:
-                if exists(dd): break
-            assert dd,"could not find start dir for keys"
-            run('cp -R %s* easy-rsa/'%dd)
-            with cd('easy-rsa'):
-                if not exists('openssl.cnf') and exists('openssl-1.0.0.cnf'):
-                    run('ln -f -s openssl-1.0.0.cnf openssl.cnf')
-                #sudo('cp %s/data/openvpn/vars .' % dirname)
-                with prefix("source vars"):
-                    run('./clean-all')
-                    run('./build-dh')
-                    run('./pkitool --initca')
-                    run('./pkitool --server server')
-                with cd('keys'):
-                    run('openvpn --genkey --secret ta.key')
-                    run('cp ca.crt dh1024.pem ta.key server.key server.crt ../../')
+    run("apt-get -y --force-yes install openvpn sendemail easy-rsa")
+    with cd('/etc/openvpn'):
+        if exists('easy-rsa') and not exists('easy-rsa-bck'): run('mv easy-rsa easy-rsa-bck')
+        if make_cadir: run('make-cadir easy-rsa')
+        with cd('easy-rsa'):
+            with prefix("source vars"):
+                run('./clean-all')
+                run('./build-ca')
+                run('./build-key-server server')
+                run('./build-dh')
+                run('openvpn --genkey --secret keys/ta.key')
+                run('cp keys/{ca.crt,server.crt,server.key,ta.key,dh2048.pem} /etc/openvpn')
             append('/etc/openvpn/easy-rsa/keys/index.txt.attr','unique_subject = no')
 
-    my_floating_ips = [x for x in FLOATING_IPS if x[1]==ourhost['virt_ip']]
+    my_floating_ips = [x for x in FLOATING_IPS if x[1] in ips]
     varss = {'bind_ip': my_floating_ips[0][2],
              'vlan_network':main_network+'.0.0',
              'ovpn_client_network':ovpn_client_network,
              'ovpn_client_netmask':ovpn_client_netmask,
              'vlan_netmask':'255.255.0.0'
              }
-    openvpn_conf_tmp = '/tmp/openvpn.conf-%s'%node_name
-    upload_template('node-confs/openvpn_server.conf',openvpn_conf_tmp,varss)
-    run('scp -o "StrictHostkeyChecking no" %s %s:/etc/openvpn/server.conf' % (openvpn_conf_tmp,ourhost['virt_ip']))
 
+    upload_template('node-confs/openvpn_server.conf','/etc/openvpn/server.conf',varss)
     varss = {'server_ip': my_floating_ips[0][2]}
-    openvpn_client_conf_tmp = '/tmp/openvpn_client.conf-%s'%node_name
-    upload_template('node-confs/openvpn_client.conf',openvpn_conf_tmp,varss)
-    run('scp -o "StrictHostkeyChecking no" %s %s:/etc/openvpn/client.example' % (openvpn_conf_tmp,ourhost['virt_ip']))
+    upload_template('node-confs/openvpn_client.conf','/etc/openvpn/client.example',varss)
+    if restart: run('service openvpn restart')
 
-    with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % ourhost['virt_ip']):
-        run('service openvpn restart')
-
-def setup_openvpn_xenial(apt=False):
-    if apt: run('apt-get update')
-    run('sudo apt-get install -y openvpn easy-rsa')
-    run('make-cadir /etc/openvpn-ca')
-    #with cd('/etc/openvpn-ca'):
-        
 def openvpn_status():
     op = run('cat /etc/openvpn/openvpn-status.log')
     rows = [r.strip().split(',') for r in op.split('\n')]
@@ -1161,14 +1110,7 @@ def append_openvpn(client_name,email,comment):
             host=OVPN_HOST)
     return apnd
 
-def client_openvpn(node_name, client_name, inlined=True, email=None):
-    ourhost = _lst(al=True, display=False)[node_name]
-    if ourhost['host'] != env.host_string:
-        return
-    with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % ourhost['virt_ip']):
-        client_openvpn_exec(client_name,inlined,email)
-
-def client_openvpn_exec(client_name,inlined,email):
+def client_openvpn(client_name,inlined,email):
     with cd('/etc/openvpn/easy-rsa'):
         with nested(prefix("source vars"%{'cn':client_name})
                     #, shell_env(KEY_NAME=client_name,KEY_CN=client_name,SOME_VAR='some_value')
@@ -1179,14 +1121,13 @@ def client_openvpn_exec(client_name,inlined,email):
                   'cn':client_name,
                   'name':client_name,
                   'ou':client_name}
-            pref = "; ".join(['export KEY_'+k.upper()+'='+v for k,v in envs.items()])+'; '
-            gencmd = pref+'./pkitool %s' % client_name
+            gencmd = './pkitool %s' % client_name
             print(gencmd)
             op = run(gencmd)
             assert 'failed to update database' not in op
         run('mkdir -p keys/%s' % client_name)
         with cd('keys/%s' % client_name):
-            run('cp ../ca.crt ../dh1024.pem ../ta.key ../%(client)s.crt ../%(client)s.key .' % {'client':client_name})
+            run('cp ../ca.crt ../dh2048.pem ../ta.key ../%(client)s.crt ../%(client)s.key .' % {'client':client_name})
             run('cp /etc/openvpn/client.example client.conf')
             if inlined:
                 run('a=`cat ca.crt`; echo -e "\n<ca>\n$a\n</ca>" >> client.conf; unset a;')
@@ -1208,7 +1149,7 @@ def client_openvpn_exec(client_name,inlined,email):
                 apnd=''
             if not fabric.contrib.files.exists(OVPN_KEYDIR): run('mkdir %s'%OVPN_KEYDIR)
             tgzfn = os.path.join(OVPN_KEYDIR,'%s.tgz'%client_name)
-            run('tar czf %(tgzfn)s ca.crt client.conf dh1024.pem'\
+            run('tar czf %(tgzfn)s ca.crt client.conf dh2048.pem'\
                 ' ta.key %(client)s.crt %(client)s.key' % {'client':client_name,'tgzfn':tgzfn})
             if email:
                 params = {'email': email, 
@@ -1845,6 +1786,11 @@ def loops_get():
 
 ps = {'p':'primary','s':'secondary'}
 
+def get_ips():
+    rt = run('ip a show')
+    hips = [m.group(1) for m in re.finditer('inet ([0-9\.]+)',rt) if m.group(1) not in ['127.0.0.1']]
+    return hips
+
 def drbd_setup(apt=False,create_md=False,test_failover=True,force_primary=True):
     # drbd protocol versions by ubuntu release:
     # 14.04: version: 8.4.3 (api:1/proto:86-101)
@@ -1884,8 +1830,8 @@ def drbd_setup(apt=False,create_md=False,test_failover=True,force_primary=True):
                 detc['secret']=hashlib.sha256(detc['name']+DRBD_SALT).hexdigest()[0:8]
             for r in ps:
                 if hs in matches[r]:
-                    rt = run('ip a show')
-                    hips = [m.group(1) for m in re.finditer('inet ([0-9\.]+)',rt) if m.group(1) not in ['127.0.0.1']]
+                    hips = get_ips()
+
                     lbl = '%s_ip'%ps[r]
                     sip = detc[lbl]
                     assert sip in hips,"could not find %s %s in %s for %s"%(lbl,sip,hips,env.host_string)
