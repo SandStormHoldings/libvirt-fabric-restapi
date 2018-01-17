@@ -235,6 +235,7 @@ def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbrad
     #raise Exception('main_ip for',env.host_string,'is',main_ip)
     varss = {'main_ip':main_ip,
              'ovpn_internal_addr':ovpn_internal_addr,
+             'default_search':DEFAULT_SEARCH,
              'internal_gateway':INTERNAL_GATEWAYS[env.host_string],
              'ovpn_client_network':ovpn_client_network,
              'gateway':gw,
@@ -973,8 +974,6 @@ def fix_ifnames():
     run('grub-mkconfig -o /boot/grub/grub.cfg')
 
 def setup_openvpn(restart=False,make_cadir=True):
-
-    
     ips = get_ips()
 
     #run('echo "nameserver 8.8.8.8" > /etc/resolv.conf')
