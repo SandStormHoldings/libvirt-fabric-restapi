@@ -82,6 +82,10 @@ DRBD_RESOURCES={}
 DRBD_SALT=None
 NOTES={}
 
+RBD_POOL='libvirt-pool'
+VIRT_MODE='file' # can be: rbd.
+RBD_MONITOR_HOST=None
+
 # import the local overrides of the defaults above.
 from config_noodles import *
 try:

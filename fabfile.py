@@ -33,8 +33,8 @@ import fabric.contrib.files
 
 from config import (HOSTS, VLAN_GATEWAYS, INTERNAL_GATEWAYS, VLAN_RANGES, FLOATING_IPS,IPV6,DEFAULT_GATEWAY,HOST_GATEWAYS,
                     DEFAULT_RAM, DEFAULT_VCPU, OVPN_HOST, main_network, ovpn_client_network,ovpn_internal_addr,ssh_passwords,
-                    ovpn_client_netmask, DIGEST_REALM, SECRET_KEY, IMAGES, LOWERED_PRIVILEGES, snmpd_network, OVPN_KEY_SENDER, JUMPHOST_EXTERNAL_IP, DEFAULT_SEARCH, DNS_HOST, OVPN_KEYDIR,FORWARDED_PORTS,
-                    SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT
+                    ovpn_client_netmask, DIGEST_REALM, SECRET_KEY, IMAGES, LOWERED_PRIVILEGES, snmpd_network, OVPN_KEY_SENDER, JUMPHOST_EXTERNAL_IP, DEFAULT_SEARCH, DNS_HOST, OVPN_KEYDIR,FORWARDED_PORTS,VIRT_MODE,
+                    SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT,RBD_POOL,RBD_MONITOR_HOST
 )
 
 from config import MAIL_LOGIN,MAIL_PASSWORD,MAIL_SERVER,MAIL_PORT
@@ -282,6 +282,7 @@ def setup_dhcpd():
     virt_defs = genmacs(only_host=env.host_string)
 
     dhcpd_config_fn = os.path.join('dhcpd-confs',env.host_string+'.conf')
+
     if os.path.exists(dhcpd_config_fn):
         source_tpl = dhcpd_config_fn
         base_vars={}
@@ -310,6 +311,7 @@ def setup_dhcpd():
                 run('cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.backup')
                 run('cp /etc/dhcp/dhcpd.conf.install /etc/dhcp/dhcpd.conf')
                 run('service isc-dhcp-server restart')
+    get('/etc/dhcp/dhcpd.conf',dhcpd_config_fn)
 
 
 
@@ -471,7 +473,7 @@ def dhcp_move(src_host, dest_host, mac_addr, image_name, setup=False):
         assert len(src_ip_lines) == 1, "cannot find %s in %s" % (mac_addr, srcfn)
 
 
-def undefine(node, target, del_image=True):
+def undefine(node, target, del_image=VIRT_MODE):
     srcfn = os.path.join('dhcpd-confs', '%s.conf' % target)
     src_lines = []
     pattern = ' of ' + node + ' ['
@@ -486,12 +488,27 @@ def undefine(node, target, del_image=True):
         _, origin, _, mac, _ = parse_dhcp_line(src_lines[0])
         dhcp_move(target, origin, mac, node, setup=True)
     rt = run('virsh undefine %s' % node)
-    if del_image: run('rm -f /var/lib/libvirt/images/%(image_name)s.img'\
-                      % {'image_name': node})
+    if del_image=='file':
+        run('rm -f /var/lib/libvirt/images/%(image_name)s.img'\
+            % {'image_name': node})
+    elif del_image=='rbd':
+        run('rbd rm %s/%s'%(RBD_POOL,node))
+        
     return rt
 
 
-def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False,changesecret=False):
+def migrate(image_name,
+            dest_host,
+            src_host=None,
+            mac_addr=None,
+            mode=VIRT_MODE,
+            nocopy=False,
+            changesecret=False):
+    # if we are using rbd as our image persistence engine, its safe to say these values can be forced.
+    if VIRT_MODE=='rbd':
+        nocopy=True
+        changesecret=True
+    
     #find out where image_name resides
     if not src_host or not mac_addr:
         alst = _lst(al=True)
@@ -700,18 +717,19 @@ def virsh_secret_define():
     return uuid
 
 def create_node_rbd(node_name,
-                    monitor_host,
+                    monitor_host=RBD_MONITOR_HOST,
                     memory=DEFAULT_RAM,
                     vcpu=DEFAULT_VCPU,
                     configure=True,
                     simulate=False,
                     image_clone=None,
                     image_size='2G',
-                    pool='libvirt-pool',
+                    pool=RBD_POOL,
                     **kwargs
                     ):
 
     uuid = virsh_secret_define()
+    assert monitor_host
     eargs = {'pool':pool,
              'monitor-host':monitor_host,
              'secret-uuid':uuid}
@@ -1726,8 +1744,8 @@ def ceph_fix_loop_journal_symlink(ldev='/dev/mapper/loop0p2'):
 
 
 def ceph_setup_libvirt():
-    run('ceph osd pool create libvirt-pool 128 128')
-    run("""ceph auth get-or-create client.libvirt mon 'allow r' osd 'allow class-read object_prefix rbd_children, allow rwx pool=libvirt-pool'""")
+    run('ceph osd pool create %s 128 128'%RBD_POOL)
+    run("""ceph auth get-or-create client.libvirt mon 'allow r' osd 'allow class-read object_prefix rbd_children, allow rwx pool=%s'"""%RBD_POOL)
 
 def openattic_install():
     assert run('lsb_release -c -s')=='xenial'
