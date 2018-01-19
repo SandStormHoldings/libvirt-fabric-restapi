@@ -33,7 +33,7 @@ import fabric.contrib.files
 
 from config import (HOSTS, VLAN_GATEWAYS, INTERNAL_GATEWAYS, VLAN_RANGES, FLOATING_IPS,IPV6,DEFAULT_GATEWAY,HOST_GATEWAYS,
                     DEFAULT_RAM, DEFAULT_VCPU, OVPN_HOST, main_network, ovpn_client_network,ovpn_internal_addr,ssh_passwords,
-                    ovpn_client_netmask, DIGEST_REALM, SECRET_KEY, IMAGES, LOWERED_PRIVILEGES, snmpd_network, OVPN_KEY_SENDER, JUMPHOST_EXTERNAL_IP, DEFAULT_SEARCH, DNS_HOST, OVPN_KEYDIR,FORWARDED_PORTS,VIRT_MODE,
+                    ovpn_client_netmask, DIGEST_REALM, SECRET_KEY, IMAGES, RBD_IMAGES, LOWERED_PRIVILEGES, snmpd_network, OVPN_KEY_SENDER, JUMPHOST_EXTERNAL_IP, DEFAULT_SEARCH, DNS_HOST, OVPN_KEYDIR,FORWARDED_PORTS,VIRT_MODE,
                     SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT,RBD_POOL,RBD_MONITOR_HOST
 )
 
@@ -43,7 +43,10 @@ env.passwords=ssh_passwords
 #make sure that key config settings are assigned
 assert main_network and ovpn_client_network and ovpn_client_netmask,"%s , %s , %s"%(main_network, ovpn_client_network, ovpn_client_netmask)
 assert DIGEST_REALM and SECRET_KEY
-assert type(IMAGES)==dict,type(IMAGES)
+if VIRT_MODE=='file':
+    assert type(IMAGES)==dict,type(IMAGES)
+elif VIRT_MODE=='rbd':
+    assert type(RBD_IMAGES)==dict,type(RBD_IMAGES)
 
 import os
 #NETWORKING_RESTART_CMD='/etc/init.d/networking restart' #12.04
@@ -503,11 +506,13 @@ def migrate(image_name,
             mac_addr=None,
             mode=VIRT_MODE,
             nocopy=False,
-            changesecret=False):
+            changesecret=False,
+            start_finally=False):
     # if we are using rbd as our image persistence engine, its safe to say these values can be forced.
     if VIRT_MODE=='rbd':
         nocopy=True
         changesecret=True
+        start_finally=True
     
     #find out where image_name resides
     if not src_host or not mac_addr:
@@ -575,6 +580,9 @@ def migrate(image_name,
         with settings(host_string=src_host):
             run('virsh undefine %s' % image_name)
             if not nocopy: run('rm /var/lib/libvirt/images/%(image_name)s.img.gz' % {'image_name': image_name})
+        with settings(host_string=dest_host):
+            if start_finally:
+                run('virsh start %s'%image_name)
     finally:
         if os.path.exists(xml_node_description):
             os.unlink(xml_node_description)
@@ -726,7 +734,7 @@ def create_node_rbd(node_name,
                     vcpu=DEFAULT_VCPU,
                     configure=True,
                     simulate=False,
-                    image_clone=None,
+                    image_clone=list(RBD_IMAGES.items())[0][0],
                     image_size='2G',
                     pool=RBD_POOL,
                     **kwargs
