@@ -643,8 +643,11 @@ def create_node(node_name,
                 xml_tpl='node-tpl.xml',
                 args={},
                 ):
-    if not template_name and IMAGES:
+    if template_name=='RBD':
+        template_name=None
+    elif (not template_name and IMAGES):
         template_name = list(IMAGES.items())[0][0]
+
     if template_name:
         tplfn = os.path.join('/var/lib/libvirt/images',template_name)
     else:
@@ -652,6 +655,7 @@ def create_node(node_name,
     nodefn = os.path.join('/var/lib/libvirt/images','%s.img'%node_name)
     if tplfn:
         assert fabric.contrib.files.exists(tplfn),"%s does not exist"%tplfn
+
     assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
     ns = uuid.NAMESPACE_DNS
     print('about to create uuid for node with ns %s, node name %s' % (ns, node_name.encode('utf-8')))
@@ -722,7 +726,7 @@ def create_node_rbd(node_name,
     else:
         run('qemu-img create -f rbd rbd:%s/%s %s'%(pool,node_name,image_size))
     create_node(node_name,
-                template_name=None,
+                template_name='RBD',
                 memory=memory,
                 vcpu=vcpu,
                 configure=configure,
