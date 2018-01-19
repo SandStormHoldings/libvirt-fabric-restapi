@@ -1467,7 +1467,7 @@ def htdigest_upload():
     put('conf_repo/digest.pw','/etc/apache2/digest.pw')
     
 def install_staticwebserver(authorized_keys_fn=None,
-                            vhost='static.ezd.lan',
+                            vhost='static.'+DEFAULT_SEARCH,
                             user='static',
                             ):
     put('node-confs/static/nologin','/sbin/nologin')
