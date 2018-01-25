@@ -1262,7 +1262,7 @@ def del_dns(domain):
 #         run('initctl restart restapi')
 #         run('initctl start restapi')
 
-def enlarge_lvm(target, new_size='50G'):
+def enlarge_lvm(target, new_size='50G',virt_mode=None):
     def wait_for(cmd):
         puts('waiting for guest for %s...'%cmd)
         cycles = 0
@@ -1278,10 +1278,15 @@ def enlarge_lvm(target, new_size='50G'):
 
     target_ip = guests[target].get('virt_ip')
     print('target ip for %s is %s'%(target,target_ip))
-    image = '/var/lib/libvirt/images/%s.img' % target
-    if not exists(image):
-        abort('missing image for "%s" guest' % target)
-
+    if virt_mode is None: virt_mode = VIRT_MODE
+    if virt_mode=='file':
+        image = '/var/lib/libvirt/images/%s.img' % target
+        if not exists(image):
+            abort('missing image for "%s" guest' % target)
+    elif virt_mode=='rbd':
+        image = 'rbd:%s/%s'%(RBD_POOL,target)
+    else:
+        raise Exception('unknown virt mode',virt_mode)
     ssh_options = ' '.join(('-o %s=%s ' % (k,v)) for k,v in {
         'StrictHostkeyChecking': 'no',
         'UserKnownHostsFile': '/dev/null',
@@ -1329,8 +1334,8 @@ def enlarge_lvm(target, new_size='50G'):
     with settings(shell=shellcmd):
         puts( 'about to pvresize')
         run('pvresize /dev/vda5')
-        run('lvextend -l +100%FREE /dev/ubuntu/root')
-        run('resize2fs /dev/ubuntu/root')
+        run('lvextend -l +100%FREE /dev/ubuntu-vg/root')
+        run('resize2fs /dev/ubuntu-vg/root')
         puts('pvresize + lvextend + resize2fs are done.')
 
 
@@ -1759,6 +1764,9 @@ def ceph_setup_libvirt():
     run('ceph osd pool create %s 128 128'%RBD_POOL)
     run("""ceph auth get-or-create client.libvirt mon 'allow r' osd 'allow class-read object_prefix rbd_children, allow rwx pool=%s'"""%RBD_POOL)
 
+def ceph_health():
+    run('''ceph health ; ceph pg dump_stuck 2>&1 | awk '{print $2}' | sort | uniq -c | sort -n  ; rados df''')
+    
 def openattic_install():
     assert run('lsb_release -c -s')=='xenial'
     run("wget http://apt.openattic.org/A7D3EAFA.txt -q -O - | apt-key add -")
@@ -2163,13 +2171,15 @@ def test_data_writerange(pth,ifr=0,ito=20,put_=True,seqlen=DEFAULT_SEQLEN):
 
 def test_data_read(pth,i,put_=False,seqlen=DEFAULT_SEQLEN):
     if put_: test_data_install()
-    op = run('''[[ "$(python /tmp/genrand.py %s %s | md5sum | awk '{print $1}')" == "$(md5sum %s/%s | awk '{print $1}')" ]] || echo "UNEQUAL %s"'''%(i,seqlen,pth,i,i))
-    if 'UNEQUAL' in op: raise Exception('bad result')
+    with settings(hide('running')):        
+        op = run('''[[ "$(python /tmp/genrand.py %s %s | md5sum | awk '{print $1}')" == "$(md5sum %s/%s | awk '{print $1}')" ]] || echo "UNEQUAL %s"'''%(i,seqlen,pth,i,i))
+    if 'UNEQUAL' in op: raise Exception('bad result %s'%op)
 
 def test_data_readrange(pth,ifr=0,ito=20,put_=True,seqlen=DEFAULT_SEQLEN):
     if put_: test_data_install()
     c = int(ifr)
     while c < int(ito):
+        if c % 10 == 0: print('%s : %s'%(env.host_string,c))
         test_data_read(pth,c,False,seqlen)
         c+=1
 
