@@ -388,14 +388,20 @@ def setup_port_forwarding():
     myipt = init_ipt()
     print('myipt is',myipt)
     if not env.host_string in FORWARDED_PORTS: return
+    cont = [ln.strip() for ln in open(myipt,'r').read().split("\n") if ln.strip()!='']
     for fp in FORWARDED_PORTS[env.host_string]:
         cmd = 'iptables -tnat -A PREROUTING -d %(endpoint_host)s/32 -p tcp -m tcp --dport %(endpoint_port)s -j DNAT --to-destination %(redirect_host)s:%(redirect_port)s'%fp
-        cont = [ln.strip() for ln in open(myipt,'r').read().split("\n") if ln.strip()!='']
         if cmd not in cont:
+            print('APPENDING, EXECUTING',cmd)
             cont.append(cmd)
             run(cmd) # execute immediately in case we can't find it in the file
-    fp = open(myipt,'w') ; fp.write("\n".join(cont)) ; fp.close()
+        else:
+            print(cmd,'ALREADY IN',myipt)
+    cwr = "\n".join(cont)
+    fp = open(myipt,'w') ; fp.write(cwr) ; fp.close()
+    print('WRITTEN LOCALLY',myipt)
     if os.path.exists(myipt):
+        print('UPLOADING as /etc/iptables.sh')
         put(myipt,'/etc/iptables.sh')
 @parallel
 def destroy(node,target=None):
@@ -656,8 +662,7 @@ def create_node(node_name,
     assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
     ns = uuid.NAMESPACE_DNS
     print('about to create uuid for node with ns %s, node name %s' % (ns, node_name.encode('utf-8')))
-    uuidi = uuid.uuid5(namespace=ns, name=node_name.encode('utf-8'))
-
+    uuidi = uuid.uuid5(namespace=ns, name=node_name) #.encode('utf-8')
     variables = {
         'uuid':str(uuidi),
         'name':node_name,
@@ -1622,9 +1627,10 @@ def install_tasks(user='tasks',
         run('add-apt-repository    "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"')
         run('apt-get update')
         run('apt-get install -y -q docker-ce')
+    if fetch:
+        with settings(warn_only=True): run('adduser {user} --disabled-password --gecos ""'.format(user=user))
     with cd('/home/{user}'.format(user=user)):    
         if fetch:
-            with settings(warn_only=True): run('adduser {user} --disabled-password --gecos ""'.format(user=user))
             run('usermod -aG docker {user}'.format(user=user))
             if overwrite: run('rm -rf .git *') # get rid of the homedir entirely
             run('git clone https://github.com/SandStormHoldings/ScratchDocs')
@@ -2072,6 +2078,19 @@ def dump_xmls():
     # vgchange -a y container
 
 
+def postfix_install():
+    run('apt-get install -y postfix ca-certificates') #postfix:no-configuration
+    for fn in ['/etc/postfix/main.cf']:
+        put(os.path.join('conf_repo/node-configs/%s'%env.host_string,fn),fn)
+
+def mailcow_install():
+    cmds=['curl -sSL https://get.docker.com/ | sh',
+          'curl -L https://github.com/docker/compose/releases/download/$(curl -Ls https://www.servercow.de/docker-compose/latest.php)/docker-compose-$(uname -s)-$(uname -m) > /usr/local/bin/docker-compose',
+          'chmod +x /usr/local/bin/docker-compose',
+          'apt-get install -y git',
+          'git clone https://github.com/mailcow/mailcow-dockerized',
+    ]
+
 def etckeeper_install():
     run('apt-get install -q -y git etckeeper')
     run('git config --global user.email "root@%s.%s"'%(env.host_string,DEFAULT_SEARCH))
@@ -2173,3 +2192,4 @@ def test_data_readrange(pth,ifr=0,ito=20,put_=True,seqlen=DEFAULT_SEQLEN):
     while c < int(ito):
         test_data_read(pth,c,False,seqlen)
         c+=1
+
