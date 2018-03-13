@@ -34,7 +34,7 @@ import fabric.contrib.files
 from config import (HOSTS, VLAN_GATEWAYS, VLAN_RANGES, FLOATING_IPS,IPV6,DEFAULT_GATEWAY,HOST_GATEWAYS,
                     DEFAULT_RAM, DEFAULT_VCPU, OVPN_HOST, main_network, ovpn_client_network,ovpn_internal_addr,ssh_passwords,
                     ovpn_client_netmask, DIGEST_REALM, SECRET_KEY, IMAGES, LOWERED_PRIVILEGES, snmpd_network, OVPN_KEY_SENDER, JUMPHOST_EXTERNAL_IP, DEFAULT_SEARCH, DNS_HOST, OVPN_KEYDIR,FORWARDED_PORTS,
-                    SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT
+                    SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT,ETH_ALIASES
 )
 
 from config import MAIL_LOGIN,MAIL_PASSWORD,MAIL_SERVER,MAIL_PORT
@@ -233,7 +233,16 @@ def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbrad
 
     gw = HOST_GATEWAYS.get(env.host_string) and HOST_GATEWAYS.get(env.host_string)  or DEFAULT_GATEWAY
     #raise Exception('main_ip for',env.host_string,'is',main_ip)
+    aliastpl=['# device: %(device)s','auto  %(device)s','iface %(device)s inet static','  address   %(address)s','  netmask   %(netmask)s']
+    avars = ETH_ALIASES.get(env.host_string,[])
+    i=0
+    for avar in avars:
+        if 'device' not in avar: avar['device']='eth0:%s'%i
+        i+=1
+    avarsstr="\n\n".join(["\n".join(aliastpl)%avars[i] for i in range(len(avars))])
+
     varss = {'main_ip':main_ip,
+             'aliases':avarsstr,
              'ovpn_internal_addr':ovpn_internal_addr,
              'ovpn_client_network':ovpn_client_network,
              'gateway':gw,
@@ -243,6 +252,7 @@ def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbrad
              'vlan_bcast': main_network+'.0.255',
              'my_floating_ips':apnd,
              'extra':'',}
+
     badaddr = '.'.join(ovpn_internal_addr.split('.')[0:2])
     assert not main_ip.startswith(badaddr),"achtung - setting main ip to internal addr %s"%main_ip
     with cd('/etc/network'):
