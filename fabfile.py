@@ -95,10 +95,10 @@ def uptime():
 
 @parallel
 def gdrive_install():
-    if not exists('/usr/local/bin/gdrive'): run("cd /usr/local/bin && curl -L -o gdrive 'https://drive.google.com/uc?id=0B3X9GlR6EmbnUWZGRmYxVUU2M00' && chmod +x gdrive")
+    if not exists('/usr/local/bin/gdrive'): run("cd /usr/local/bin && curl -L -o gdrive 'https://docs.google.com/uc?id=0B3X9GlR6EmbnQ0FtZmJJUXEyRTA&export=download' && chmod +x gdrive")
     if not exists('~/.gdrive'): run('mkdir ~/.gdrive')
-    put('conf_repo/gdrive/config.json','/root/.gdrive/')
-    put('conf_repo/gdrive/token.json','/root/.gdrive/')
+    #put('conf_repo/gdrive/config.json','/root/.gdrive/')
+    put('conf_repo/gdrive/token_v2.json','/root/.gdrive/')
 
 @parallel
 def gdrive_get_image(imgid,fn):
