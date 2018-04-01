@@ -86,6 +86,8 @@ RBD_POOL='libvirt-pool'
 VIRT_MODE='file' # can be: rbd.
 RBD_MONITOR_HOST=None
 
+ETH_ALIASES={}
+
 # import the local overrides of the defaults above.
 from config_noodles import *
 try:
@@ -98,7 +100,16 @@ except ImportError:
 assert len(FLOATING_IPS)== len(set([k[2] for k in FLOATING_IPS])),"external ips not unique"
 assert len(FLOATING_IPS)== len(set([k[1] for k in FLOATING_IPS])),"more than a single floating ip per-host?" 
 
+
 VLAN_GATEWAYS={} ; INTERNAL_GATEWAYS={} ; VLAN_RANGES={} ; HOST_IDX={}
+
+fips = set([f[2] for f in FLOATING_IPS])
+
+for hostname,aliases in ETH_ALIASES.items():
+    aaddr = set([a['address'] for a in aliases])
+    ts = aaddr.intersection(fips)
+    assert len(ts)==0,"we have some overbooked ips for ETH_ALIASES of %s (%s)"%(hostname,ts)
+
 for ip in [ip for ip in ips if HOST_PREFIX in ip]:
     try:
         i = int(ip.replace(HOST_PREFIX,''))

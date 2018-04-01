@@ -34,7 +34,7 @@ import fabric.contrib.files
 from config import (HOSTS, VLAN_GATEWAYS, INTERNAL_GATEWAYS, VLAN_RANGES, FLOATING_IPS,IPV6,DEFAULT_GATEWAY,HOST_GATEWAYS,
                     DEFAULT_RAM, DEFAULT_VCPU, OVPN_HOST, main_network, ovpn_client_network,ovpn_internal_addr,ssh_passwords,
                     ovpn_client_netmask, DIGEST_REALM, SECRET_KEY, IMAGES, RBD_IMAGES, LOWERED_PRIVILEGES, snmpd_network, OVPN_KEY_SENDER, JUMPHOST_EXTERNAL_IP, DEFAULT_SEARCH, DNS_HOST, OVPN_KEYDIR,FORWARDED_PORTS,VIRT_MODE,
-                    SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT,RBD_POOL,RBD_MONITOR_HOST
+                    SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT,RBD_POOL,RBD_MONITOR_HOST,ETH_ALIASES
 )
 
 from config import MAIL_LOGIN,MAIL_PASSWORD,MAIL_SERVER,MAIL_PORT
@@ -98,10 +98,10 @@ def uptime():
 
 @parallel
 def gdrive_install():
-    if not exists('/usr/local/bin/gdrive'): run("cd /usr/local/bin && curl -L -o gdrive 'https://drive.google.com/uc?id=0B3X9GlR6EmbnUWZGRmYxVUU2M00' && chmod +x gdrive")
+    if not exists('/usr/local/bin/gdrive'): run("cd /usr/local/bin && curl -L -o gdrive 'https://docs.google.com/uc?id=0B3X9GlR6EmbnQ0FtZmJJUXEyRTA&export=download' && chmod +x gdrive")
     if not exists('~/.gdrive'): run('mkdir ~/.gdrive')
-    put('conf_repo/gdrive/config.json','/root/.gdrive/')
-    put('conf_repo/gdrive/token.json','/root/.gdrive/')
+    #put('conf_repo/gdrive/config.json','/root/.gdrive/')
+    put('conf_repo/gdrive/token_v2.json','/root/.gdrive/')
 
 @parallel
 def gdrive_get_image(imgid,fn):
@@ -236,7 +236,16 @@ def setup_network(snmpd_network=snmpd_network,writecfg=True,restart=True,runbrad
 
     gw = HOST_GATEWAYS.get(env.host_string) and HOST_GATEWAYS.get(env.host_string)  or DEFAULT_GATEWAY
     #raise Exception('main_ip for',env.host_string,'is',main_ip)
+    aliastpl=['# device: %(device)s','auto  %(device)s','iface %(device)s inet static','  address   %(address)s','  netmask   %(netmask)s']
+    avars = ETH_ALIASES.get(env.host_string,[])
+    i=0
+    for avar in avars:
+        if 'device' not in avar: avar['device']='eth0:%s'%i
+        i+=1
+    avarsstr="\n\n".join(["\n".join(aliastpl)%avars[i] for i in range(len(avars))])
+
     varss = {'main_ip':main_ip,
+             'aliases':avarsstr,
              'ovpn_internal_addr':ovpn_internal_addr,
              'default_search':DEFAULT_SEARCH,
              'internal_gateway':INTERNAL_GATEWAYS[env.host_string],
@@ -390,14 +399,20 @@ def setup_port_forwarding():
     myipt = init_ipt()
     print('myipt is',myipt)
     if not env.host_string in FORWARDED_PORTS: return
+    cont = [ln.strip() for ln in open(myipt,'r').read().split("\n") if ln.strip()!='']
     for fp in FORWARDED_PORTS[env.host_string]:
         cmd = 'iptables -tnat -A PREROUTING -d %(endpoint_host)s/32 -p tcp -m tcp --dport %(endpoint_port)s -j DNAT --to-destination %(redirect_host)s:%(redirect_port)s'%fp
-        cont = [ln.strip() for ln in open(myipt,'r').read().split("\n") if ln.strip()!='']
         if cmd not in cont:
+            print('APPENDING, EXECUTING',cmd)
             cont.append(cmd)
             run(cmd) # execute immediately in case we can't find it in the file
-    fp = open(myipt,'w') ; fp.write("\n".join(cont)) ; fp.close()
+        else:
+            print(cmd,'ALREADY IN',myipt)
+    cwr = "\n".join(cont)
+    fp = open(myipt,'w') ; fp.write(cwr) ; fp.close()
+    print('WRITTEN LOCALLY',myipt)
     if os.path.exists(myipt):
+        print('UPLOADING as /etc/iptables.sh')
         put(myipt,'/etc/iptables.sh')
 @parallel
 def destroy(node,target=None):
@@ -1605,9 +1620,10 @@ def install_tasks(user='tasks',
         run('add-apt-repository    "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"')
         run('apt-get update')
         run('apt-get install -y -q docker-ce')
+    if fetch:
+        with settings(warn_only=True): run('adduser {user} --disabled-password --gecos ""'.format(user=user))
     with cd('/home/{user}'.format(user=user)):    
         if fetch:
-            with settings(warn_only=True): run('adduser {user} --disabled-password --gecos ""'.format(user=user))
             run('usermod -aG docker {user}'.format(user=user))
             if overwrite: run('rm -rf .git *') # get rid of the homedir entirely
             run('git clone https://github.com/SandStormHoldings/ScratchDocs')
