@@ -100,6 +100,16 @@ def gdrive_install():
     #put('conf_repo/gdrive/config.json','/root/.gdrive/')
     put('conf_repo/gdrive/token_v2.json','/root/.gdrive/')
 
+
+def gdrive_uninstall():
+    fns=['/usr/local/bin/gdrive',
+         '/root/.gdrive/token.json',
+         '/root/.gdrive/token_v2.json',
+         '/root/.gdrive/config.json']
+    for fn in fns:
+        if exists(fn):
+            run('rm %s'%fn)
+
 @parallel
 def gdrive_get_image(imgid,fn):
     run("cd /var/lib/libvirt/images && gdrive download -i '%s' && gzip -d %s"%(imgid,fn))
@@ -2160,7 +2170,16 @@ def etckeeper_changes(repo='/etc'):
     with cd(repo):
         run('git status --porc | wc -l')
 
+def images_ls():
+    run('ls -1 /var/lib/libvirt/images/')
 
+def compress(files,prefix='/var/lib/libvirt/images/',output='bck.tar.gz'):
+    files=files.split(",")
+    with cd(prefix):
+        
+        cmd='''FILES="%(files)s" ; tar -cf - $FILES | pv -s $(du -sb $FILES | awk '{print $1}' | awk '{ sum += $1; } END { print sum; }' "$@") | pigz > %(output)s'''%{'files':" ".join(files),'output':output}
+        run(cmd)
+    
 def boot_purge_old_images():
     """get rid of old linux images in /boot if it fills up"""
     run('''dpkg -l linux-image-\* | grep ^ii | awk '{print $2}' | egrep -v "$(uname -r)" | egrep -v "linux-image-generic" | xargs dpkg --purge''')
