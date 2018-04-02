@@ -104,6 +104,16 @@ def gdrive_install():
     put('conf_repo/gdrive/token_v2.json','/root/.gdrive/')
 
 @parallel
+def gdrive_uninstall():
+    fns=['/usr/local/bin/gdrive',
+         '/root/.gdrive/token.json',
+         '/root/.gdrive/token_v2.json',
+         '/root/.gdrive/config.json']
+    for fn in fns:
+        if exists(fn):
+            run('rm %s'%fn)
+            
+@parallel
 def gdrive_get_image(imgid,fn):
     run("cd /var/lib/libvirt/images && gdrive download -i '%s' && gzip -d %s"%(imgid,fn))
 
