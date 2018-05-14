@@ -650,6 +650,7 @@ def new_mac():
             break
     assert mac
     #/ANALLY FENCED
+    print(mac)
     return mac
 
 
