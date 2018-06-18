@@ -394,7 +394,7 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
     #ip route add 10.0.1.0/16 dev eth0 via 10.0.1.4
 
 
-def setup_port_forwarding():
+def setup_port_forwarding(exec=True):
     myipt = init_ipt()
     print('myipt is',myipt)
     if not env.host_string in FORWARDED_PORTS: return
@@ -404,7 +404,7 @@ def setup_port_forwarding():
         if cmd not in cont:
             print('APPENDING, EXECUTING',cmd)
             cont.append(cmd)
-            run(cmd) # execute immediately in case we can't find it in the file
+            if exec: run(cmd) # execute immediately in case we can't find it in the file
         else:
             print(cmd,'ALREADY IN',myipt)
     cwr = "\n".join(cont)
@@ -848,12 +848,16 @@ def _lst(al=False, display=True,network_info=True,prefix_re=None,memory=False,re
     if al: cmd+= ' --all'
     with settings(parallel=True,warn_only=True):
         with hide('output','running'):
+            print('executing',cmd)
             rt = execute(run,cmd) #.split('\n')
     hdr = ['host','node id','node name','node state','node mac','node virt ip','public ip']
     if memory: hdr+=['mem']
     pt = prettytable.PrettyTable(hdr)
     for hn,op in rt.items():
         if hn=='<local-only>': hn=env.host_string
+        if op is None:
+            op=''
+            print('WARNING: op is None for',hn)
         for ln in op.split('\n'):
             if ln.startswith('---') or ln.startswith('Id'): continue
             parsed = linere.search(ln)

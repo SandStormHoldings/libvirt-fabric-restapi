@@ -92,7 +92,7 @@ except ImportError:
 # the below section make some deductions from both default and overriden config. it is important for it to be run *at the end* of all configs.
 
 assert len(FLOATING_IPS)== len(set([k[2] for k in FLOATING_IPS])),"external ips not unique"
-assert len(FLOATING_IPS)== len(set([k[1] for k in FLOATING_IPS])),"more than a single floating ip per-host?" 
+#assert len(FLOATING_IPS)== len(set([k[1] for k in FLOATING_IPS])),"more than a single floating ip per-host?" 
 
 fips = set([f[2] for f in FLOATING_IPS])
 
