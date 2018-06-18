@@ -2145,24 +2145,27 @@ class lck():
         #self.cr.restore()
 
 def etckeeper_pull(repo='/etc',hostname=None,commit=True):
+    lrepo = repo[1:]    
     with lck('etckeeper_pull'):
+
         if not hostname: hostname=env.host_string
         if commit: 
             with cd(repo):
                 ch = [ln for ln in run('git status --porcelain').split('\n') if ln!='']
                 if len(ch):
                     run('etckeeper commit etckeeper_pull')
-        hdir = os.path.join('conf_repo/etckeeper',hostname)
-        local('mkdir -p %s'%hdir)
+        hdir = os.path.join('conf_repo/etckeeper',lrepo,hostname) # we skip the first forward slash (abs path) from the repo dir
         ldir = os.path.basename(repo)
+        
+        local('mkdir -p %s'%os.path.dirname(hdir))
+        ex = os.path.exists(hdir) #os.path.join(hdir,ldir))
+        if not ex:
+            print('cloning (exists=%s) %s:%s into %s'%(ex,hostname,repo,hdir))
+            #raise Exception(hdir,ldir,os.path.exists(ldir))
+            local('git clone %s:%s %s'%(hostname,repo,hdir))
         with lcd(hdir):
-            #raise Exception('dir %s, am in %s'%(ldir,hdir))
-            if not os.path.exists(os.path.join(hdir,ldir)):
-                #raise Exception(hdir,ldir,os.path.exists(ldir))
-
-                local('git clone %s:%s %s'%(hostname,repo,ldir))
-            with lcd(ldir):
-                local('git pull origin master')
+            local('git pull origin master')
+        print('cd conf_repo/ && git submodule add %(hostname)s:%(repo)s ./etckeeper/%(lrepo)s/%(hostname)s'%locals())
 
 def etckeeper_pull_nodes():
     n = _lst(display=False)
