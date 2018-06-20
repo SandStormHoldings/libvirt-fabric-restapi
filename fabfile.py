@@ -662,7 +662,8 @@ def create_node(node_name,
     assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
     ns = uuid.NAMESPACE_DNS
     print('about to create uuid for node with ns %s, node name %s' % (ns, node_name.encode('utf-8')))
-    uuidi = uuid.uuid5(namespace=ns, name=node_name) #.encode('utf-8')
+    uuidi = uuid.uuid5(namespace=ns, name=node_name.encode('utf-8'))#.encode('utf-8')
+    print('new node uuid:',uuidi)
     variables = {
         'uuid':str(uuidi),
         'name':node_name,
@@ -675,7 +676,6 @@ def create_node(node_name,
         'brint':'br0',
     }
     for k,v in args.items(): variables[k]=v
-
     if simulate=='1': return variables
 
     if tplfn:

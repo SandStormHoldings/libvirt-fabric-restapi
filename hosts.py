@@ -47,7 +47,7 @@ rnre = (re.compile('(^[0-9]+) running nodes'),1,'running nodes')
 tnre = (re.compile('(^[0-9]+) total nodes'),1,'total nodes')
 tests = [dre,mre,m2re,lre,rnre,tnre,ngre]
 commands = ["free -m",
-            "df -m",
+            "df -m | grep -v '/var/lib/docker'",
             "uptime",
             """virsh -q list  | wc -l | awk '{print $1,"running nodes"}'""",
             """virsh -q list --all  | wc -l | awk '{print $1,"total nodes"}'""",
