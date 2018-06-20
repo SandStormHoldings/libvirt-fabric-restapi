@@ -95,10 +95,20 @@ def uptime():
 
 @parallel
 def gdrive_install():
-    if not exists('/usr/local/bin/gdrive'): run("cd /usr/local/bin && curl -L -o gdrive 'https://drive.google.com/uc?id=0B3X9GlR6EmbnUWZGRmYxVUU2M00' && chmod +x gdrive")
+    if not exists('/usr/local/bin/gdrive'): run("cd /usr/local/bin && curl -L -o gdrive 'https://docs.google.com/uc?id=0B3X9GlR6EmbnQ0FtZmJJUXEyRTA&export=download' && chmod +x gdrive")
     if not exists('~/.gdrive'): run('mkdir ~/.gdrive')
-    put('conf_repo/gdrive/config.json','/root/.gdrive/')
-    put('conf_repo/gdrive/token.json','/root/.gdrive/')
+    #put('conf_repo/gdrive/config.json','/root/.gdrive/')
+    put('conf_repo/gdrive/token_v2.json','/root/.gdrive/')
+
+
+def gdrive_uninstall():
+    fns=['/usr/local/bin/gdrive',
+         '/root/.gdrive/token.json',
+         '/root/.gdrive/token_v2.json',
+         '/root/.gdrive/config.json']
+    for fn in fns:
+        if exists(fn):
+            run('rm %s'%fn)
 
 @parallel
 def gdrive_get_image(imgid,fn):
@@ -384,7 +394,7 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
     #ip route add 10.0.1.0/16 dev eth0 via 10.0.1.4
 
 
-def setup_port_forwarding():
+def setup_port_forwarding(exec=True):
     myipt = init_ipt()
     print('myipt is',myipt)
     if not env.host_string in FORWARDED_PORTS: return
@@ -394,7 +404,7 @@ def setup_port_forwarding():
         if cmd not in cont:
             print('APPENDING, EXECUTING',cmd)
             cont.append(cmd)
-            run(cmd) # execute immediately in case we can't find it in the file
+            if exec: run(cmd) # execute immediately in case we can't find it in the file
         else:
             print(cmd,'ALREADY IN',myipt)
     cwr = "\n".join(cont)
@@ -640,6 +650,7 @@ def new_mac():
             break
     assert mac
     #/ANALLY FENCED
+    print(mac)
     return mac
 
 
@@ -837,12 +848,16 @@ def _lst(al=False, display=True,network_info=True,prefix_re=None,memory=False,re
     if al: cmd+= ' --all'
     with settings(parallel=True,warn_only=True):
         with hide('output','running'):
+            print('executing',cmd)
             rt = execute(run,cmd) #.split('\n')
     hdr = ['host','node id','node name','node state','node mac','node virt ip','public ip']
     if memory: hdr+=['mem']
     pt = prettytable.PrettyTable(hdr)
     for hn,op in rt.items():
         if hn=='<local-only>': hn=env.host_string
+        if op is None:
+            op=''
+            print('WARNING: op is None for',hn)
         for ln in op.split('\n'):
             if ln.startswith('---') or ln.startswith('Id'): continue
             parsed = linere.search(ln)
@@ -2130,24 +2145,27 @@ class lck():
         #self.cr.restore()
 
 def etckeeper_pull(repo='/etc',hostname=None,commit=True):
+    lrepo = repo[1:]    
     with lck('etckeeper_pull'):
+
         if not hostname: hostname=env.host_string
         if commit: 
             with cd(repo):
                 ch = [ln for ln in run('git status --porcelain').split('\n') if ln!='']
                 if len(ch):
                     run('etckeeper commit etckeeper_pull')
-        hdir = os.path.join('conf_repo/etckeeper',hostname)
-        local('mkdir -p %s'%hdir)
+        hdir = os.path.join('conf_repo/etckeeper',lrepo,hostname) # we skip the first forward slash (abs path) from the repo dir
         ldir = os.path.basename(repo)
+        
+        local('mkdir -p %s'%os.path.dirname(hdir))
+        ex = os.path.exists(hdir) #os.path.join(hdir,ldir))
+        if not ex:
+            print('cloning (exists=%s) %s:%s into %s'%(ex,hostname,repo,hdir))
+            #raise Exception(hdir,ldir,os.path.exists(ldir))
+            local('git clone %s:%s %s'%(hostname,repo,hdir))
         with lcd(hdir):
-            #raise Exception('dir %s, am in %s'%(ldir,hdir))
-            if not os.path.exists(os.path.join(hdir,ldir)):
-                #raise Exception(hdir,ldir,os.path.exists(ldir))
-
-                local('git clone %s:%s %s'%(hostname,repo,ldir))
-            with lcd(ldir):
-                local('git pull origin master')
+            local('git pull origin master')
+        print('cd conf_repo/ && git submodule add %(hostname)s:%(repo)s ./etckeeper/%(lrepo)s/%(hostname)s'%locals())
 
 def etckeeper_pull_nodes():
     n = _lst(display=False)
@@ -2160,7 +2178,16 @@ def etckeeper_changes(repo='/etc'):
     with cd(repo):
         run('git status --porc | wc -l')
 
+def images_ls():
+    run('ls -1 /var/lib/libvirt/images/')
 
+def compress(files,prefix='/var/lib/libvirt/images/',output='bck.tar.gz'):
+    files=files.split(",")
+    with cd(prefix):
+        
+        cmd='''FILES="%(files)s" ; tar -cf - $FILES | pv -s $(du -sb $FILES | awk '{print $1}' | awk '{ sum += $1; } END { print sum; }' "$@") | pigz > %(output)s'''%{'files':" ".join(files),'output':output}
+        run(cmd)
+    
 def boot_purge_old_images():
     """get rid of old linux images in /boot if it fills up"""
     run('''dpkg -l linux-image-\* | grep ^ii | awk '{print $2}' | egrep -v "$(uname -r)" | egrep -v "linux-image-generic" | xargs dpkg --purge''')
