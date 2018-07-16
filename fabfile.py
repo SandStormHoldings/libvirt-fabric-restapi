@@ -2118,6 +2118,27 @@ def etckeeper_install():
             run('etckeeper commit initial')
         #raise Exception('git repo not present in /etc')
 
+def rclone_install():
+    url = 'https://downloads.rclone.org/v1.42/rclone-v1.42-linux-amd64.zip'
+    with cd('/tmp'):
+        run('wget %s'%url)
+        bn = os.path.basename(url)
+        run('unzip %s'%bn)
+        with cd('.'.join(bn.split('.')[0:-1])):
+            run('cp rclone /usr/local/bin/')
+            run('chmod +x /usr/local/bin/rclone')
+
+def snapshot_vhost(node,snapshot,tgtdir='/var/lib/libvirt/qemu/snapshots'):
+    drives = run("virsh domblklist dev-tasks | tail -n +3 | awk '{print $1}'").split("\n")
+    hostname = env.host_string
+    for dr in drives:
+        run('mkdir -p %s'%(os.path.join(tgtdir,hostname)))
+        tgtfn = os.path.join(tgtdir,hostname,dr+'.qcow2')
+        cmd = "virsh snapshot-create-as --domain %(node)s %(snapshot)s \
+        --diskspec %(dr)s,file=%(tgtfn)s \
+        --disk-only --atomic"%locals()
+        run(cmd)
+
 def etckeeper_install_nodes():
     n = _lst(display=False)
     for nn in n:
