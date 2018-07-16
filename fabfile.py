@@ -394,7 +394,7 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
     #ip route add 10.0.1.0/16 dev eth0 via 10.0.1.4
 
 
-def setup_port_forwarding(exec=True):
+def setup_port_forwarding(exec_=True):
     myipt = init_ipt()
     print('myipt is',myipt)
     if not env.host_string in FORWARDED_PORTS: return
@@ -404,7 +404,7 @@ def setup_port_forwarding(exec=True):
         if cmd not in cont:
             print('APPENDING, EXECUTING',cmd)
             cont.append(cmd)
-            if exec: run(cmd) # execute immediately in case we can't find it in the file
+            if exec_: run(cmd) # execute immediately in case we can't find it in the file
         else:
             print(cmd,'ALREADY IN',myipt)
     cwr = "\n".join(cont)
@@ -673,7 +673,8 @@ def create_node(node_name,
     assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
     ns = uuid.NAMESPACE_DNS
     print('about to create uuid for node with ns %s, node name %s' % (ns, node_name.encode('utf-8')))
-    uuidi = uuid.uuid5(namespace=ns, name=node_name) #.encode('utf-8')
+    uuidi = uuid.uuid5(namespace=ns, name=node_name.encode('utf-8'))#.encode('utf-8')
+    print('new node uuid:',uuidi)
     variables = {
         'uuid':str(uuidi),
         'name':node_name,
@@ -686,7 +687,6 @@ def create_node(node_name,
         'brint':'br0',
     }
     for k,v in args.items(): variables[k]=v
-
     if simulate=='1': return variables
 
     if tplfn:
