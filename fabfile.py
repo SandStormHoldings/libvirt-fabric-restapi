@@ -2220,3 +2220,74 @@ def test_data_readrange(pth,ifr=0,ito=20,put_=True,seqlen=DEFAULT_SEQLEN):
         test_data_read(pth,c,False,seqlen)
         c+=1
 
+from fabric.colors import red, green, yellow
+def install_python(user):
+    tdir='~/.pyenv'
+    qtdir = tdir.replace('~','/home/%s'%user)
+    pyenv = os.path.join(tdir,'bin/pyenv')
+    qpyenv = os.path.join(qtdir,'bin/pyenv')
+    venvpth = os.path.join(tdir,'plugins/pyenv-virtualenv')
+    
+    with settings(warn_only=False, sudo_user=user):
+        pth = os.path.join(qtdir,'bin')+':$PATH'
+        with shell_env(HOME='/home/' + user,
+                       PATH=pth):
+            # Install pyenv
+            if not exists(qtdir):
+                sudo('git clone https://github.com/yyuu/pyenv.git %s'%tdir)
+            else:
+                print(green('"pyenv" is already installed'))
+
+            with settings(warn_only=True):
+                res= sudo('grep ".pyenv" ~/.bashrc > /dev/null')
+            if res.failed:
+                pyenv_root = 'PYENV_ROOT="$HOME\/.pyenv"'
+                path_str = 'PATH="$PYENV_ROOT\/bin:$PATH"'
+                sudo('echo -e "\n# pyenv" >> ~/.bashrc')
+                sudo('echo "export %s" >> ~/.bashrc')
+                sudo("sed -i -e 's/%s/" + pyenv_root + "/g' ~/.bashrc")
+                sudo('echo "export %s" >> ~/.bashrc')
+                sudo("sed -i -e 's/%s/" + path_str + "/g' ~/.bashrc")
+            else:
+                print(green('"pyenv PATH" is already written'))
+
+            with settings(warn_only=True):
+                res = sudo('grep "pyenv init" ~/.bashrc > /dev/null')
+            
+            if res.failed:
+                py_str = '"$(pyenv init -)"'
+                sudo('echo "eval %s" >> ~/.bashrc')
+                sudo("sed -i -e 's/%s/" + py_str + "/g' ~/.bashrc")
+            else:
+                print(green('"pyenv" init is already written'))
+
+            if not exists(venvpth):
+                sudo('git clone https://github.com/pyenv/pyenv-virtualenv.git %s'%os.path.join(tdir,'plugins/pyenv-virtualenv'))
+            else:
+                print(green('"pyenv-virtualenv" is already installed'))
+
+            with settings(warn_only=True):
+                res = sudo('grep "pyenv virtualenv-init" ~/.bashrc > /dev/null')
+                
+            if res.failed:
+                py_str = '"$(pyenv virtualenv-init -)"'
+                sudo('echo "eval %s" >> ~/.bashrc')
+                sudo("sed -i -e 's/%s/" + py_str + "/g' ~/.bashrc")
+            else:
+                print(green('"pyenv virtualenv-init already init"'))
+
+
+            # Install Python
+            cmd = "%s install -l | awk '{print $1}' | egrep --color=never '^3\.6\.[0-9.]+$' | tail -1"%pyenv
+            python_ver = run('sudo -u %s -i %s'%(user,cmd))
+            cmd = pyenv+' versions | grep --color=never "' + python_ver + '" > /dev/null'
+            with settings(warn_only=True):
+                res = run('sudo -i -u %s %s'%(user,cmd))
+            if res.failed:
+                #print('pyenv install %s # for the latest python ver'%python_ver)
+                run('apt-get install -q -y libssl-dev')
+                run('sudo -i -u %s %s install %s'%(user,pyenv,python_ver))
+            else:
+                print(green('"python %s" is already installed' % python_ver))
+            run('sudo -i -u %s %s'%(user,pyenv+' global ' + python_ver))
+            run('sudo -i -u %s %s'%(user,pyenv+' rehash'))
