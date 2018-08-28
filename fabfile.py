@@ -321,7 +321,7 @@ def setup_dhcpd():
 
 
     with cd('/etc/dhcp/'):
-        put(source_tpl,'dhcpd.conf.install',base_vars)
+        upload_template(source_tpl,'dhcpd.conf.install',base_vars)
         with settings(warn_only=True):
             if run('diff /etc/dhcp/dhcpd.conf.install /etc/dhcp/dhcpd.conf'):
                 run('cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.backup')
@@ -352,7 +352,10 @@ def put_ssh_privkey(kfn,force_put=False,rkfnn=None):
 def install_ssh_config():
     if not env.host_string in LOWERED_PRIVILEGES:
         if not fabric.contrib.files.exists('./.ssh/ssh_config'):
-            sshc = open('ssh_config','r').read().replace(' %s'%SSH_HOST_KEYNAME,' ~/.ssh/%s'%SSH_HOST_KEYNAME).replace(' %s'%SSH_VIRT_KEYNAME,' ~/.ssh/%s'%SSH_VIRT_KEYNAME)
+            fd = open('ssh_config','rb')
+            rd = fd.read()
+            sshc = rd.replace(bytes(' %s'%SSH_HOST_KEYNAME,'utf-8'),bytes(' ~/.ssh/%s'%SSH_HOST_KEYNAME,'utf-8'))
+            sshc = sshc.replace(bytes(' %s'%SSH_VIRT_KEYNAME,'utf-8'),bytes(' ~/.ssh/%s'%SSH_VIRT_KEYNAME,'utf-8'))
             unc = io.BytesIO(sshc)
             put(unc,'.ssh/config')
 
@@ -364,6 +367,7 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
     if apt_update or not fabric.contrib.files.exists('/var/cache/apt/pkgcache.bin'): run('sudo apt-get -q update')
     #install kvm
     run('sudo apt-get -q -y install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils isc-dhcp-server zile pigz tcpdump pv sendemail sysstat htop iftop nload xmlstarlet ncdu mosh')
+    install_xsltproc()    
     run('sudo adduser `id -un` libvirtd')
     run("echo '%s' > /etc/hostname"%env.host_string)
     run ("hostname %s"%env.host_string)
@@ -383,7 +387,7 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
     if network: setup_network(snmpd_network,runbraddcmd=runbraddcmd)
     setup_port_forwarding()
     if dhcpd: setup_dhcpd()
-    install_xsltproc()
+
 
     #this works for a host machine:
     #ip addr add 10.0.1.2 dev br0
@@ -673,7 +677,7 @@ def create_node(node_name,
     assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
     ns = uuid.NAMESPACE_DNS
     print('about to create uuid for node with ns %s, node name %s' % (ns, node_name.encode('utf-8')))
-    uuidi = uuid.uuid5(namespace=ns, name=node_name.encode('utf-8'))#.encode('utf-8')
+    uuidi = uuid.uuid5(namespace=ns, name=node_name)#.encode('utf-8')
     print('new node uuid:',uuidi)
     variables = {
         'uuid':str(uuidi),

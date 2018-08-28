@@ -1,24 +1,29 @@
 * how to install the basic libvirt infrastructure
-1. make sure all hosts are acessible via ssh. define the following config files in conf_repo/:
-   - mkdir -p conf_repo/{server-confs,dhcpd-confs,restapi-ssh,network} :: create the dir structure
-   - cp sample_conf/auth.json conf_repo/ :: customize auth.json for the REST API auth
+1. install the base dependencies
+   - [ ] git submodule update --init --recursive :: get the dependencies
+   - [ ] pip install -r requirements.txt :: install python packages
+2. make sure all hosts are acessible via ssh. define the following config files in conf_repo/:
+   - [ ] mkdir -p conf_repo/{server-confs,dhcpd-confs,restapi-ssh,network} :: create the dir structure
+   - [ ] cp sample_conf/auth.json conf_repo/ :: customize auth.json for the REST API auth
    - ./server-confs/interfaces :: /etc/network/interfaces file to be used by all hosts
    - ./local_config.py :: cluster base configuration. network & host range definitions
    - ./id_rsa-host , ./id_rsa-host.pub :: ssh keys for the hosts
    - ./id_rsa-virt, ./id_rsa-virt.pub :: ssh keys for the virtual machines
    - ./ssh_config :: ssh config file describing access and authentication into all of the virtualization hosts
-2. fab -R kvm install:1 #run the bare install, initially with apt-get update
-3. make sure we survive a reboot after rewriting the network configs
+3. [ ] fab -R kvm install:1 #run the bare install, initially with apt-get update
+4. make sure we survive a reboot after rewriting the network configs
    1. fab -R kvm -- reboot
    2. fab -R kvm uptime
-4. copy the base virtualization image over to all hosts
+5. some notes on minimum requirements for a base linux image
+   1. [ ] /root/.ssh/authorized_keys to have id_rsa-virt.pub
+6. copy the base virtualization image over to all hosts
    1. cd /usr/local/bin && curl -L -o gdrive 'https://drive.google.com/uc?id=IMGID && chmod +x gdrive
    2. /usr/local/bin/gdrive #execute gdrive initially and follow the instructions to get the token
    3. from the kvm control: scp -r hyperv1:/root/.gdrive conf_repo/gdrive ,
    4. fab -R kvm gdrive_install #and spread it across the machines
    5. fab -R kvm gdrive_get_image:IMGID,ubuntu-12.04-large.img.gz
    6. fab -R kvm -- 'cd /var/lib/libvirt/images && ln -s ubuntu-12.04-large.img ubuntu-12.04-large.img'
-5. install some base services.
+7. install some base services.
    1. openvpn
       1. fab -H hyperv1 create_node:openvpn
       2. ('hyperv1', '10.100.40.10', '5.9.34.13'), #openvpn, initially allocated on hyperv1 #allocate a floating ip for this instance on hetzner robot, and assign it in the local_config.py
