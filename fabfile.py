@@ -368,7 +368,7 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
     #install kvm
     run('sudo apt-get -q -y install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils isc-dhcp-server zile pigz tcpdump pv sendemail sysstat htop iftop nload xmlstarlet ncdu mosh')
     install_xsltproc()    
-    run('sudo adduser `id -un` libvirtd')
+    run('sudo adduser `id -un` libvirt')
     run("echo '%s' > /etc/hostname"%env.host_string)
     run ("hostname %s"%env.host_string)
     #download an image
