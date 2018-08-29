@@ -1,0 +1,4 @@
+Host 10.95.*.*
+     User root
+     IdentityFile ~/.ssh/id_rsa-virt
+     

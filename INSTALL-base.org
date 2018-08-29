@@ -4,7 +4,11 @@
    - [ ] pip install -r requirements.txt :: install python packages
 2. make sure all hosts are acessible via ssh. define the following config files in conf_repo/:
    - [ ] mkdir -p conf_repo/{server-confs,dhcpd-confs,restapi-ssh,network} :: create the dir structure
+   - [ ] ssh-keygen -f conf_repo/id_rsa-host :: create host key
+   - [ ] ssh-keygen -f conf_repo/id_rsa-virt :: create nodes key
+   - [ ] IPTT=conf_repo/server-confs/iptables/iptables.sh ; touch $IPTT && chmod +x $IPTT :: iptables template
    - [ ] cp sample_conf/auth.json conf_repo/ :: customize auth.json for the REST API auth
+   - [ ] cp -r sample_conf/{server-confs,restapi-ssh,ssh_config,local_config.py} conf_repo/ :: default configs for servers. compatible with ubuntu 14.04,16.04,18.04 
    - ./server-confs/interfaces :: /etc/network/interfaces file to be used by all hosts
    - ./local_config.py :: cluster base configuration. network & host range definitions
    - ./id_rsa-host , ./id_rsa-host.pub :: ssh keys for the hosts
