@@ -37,7 +37,7 @@ from config import (HOSTS, VLAN_GATEWAYS, VLAN_RANGES, FLOATING_IPS,IPV6,DEFAULT
                     SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT,ETH_ALIASES
 )
 
-from config import MAIL_LOGIN,MAIL_PASSWORD,MAIL_SERVER,MAIL_PORT
+from config import MAIL_LOGIN,MAIL_PASSWORD,MAIL_SERVER,MAIL_PORT,PVRESIZE_BLOCKDEV,LVEXTEND_BLOCKDEV,IMAGE_FORMAT
 env.passwords=ssh_passwords
 
 #make sure that key config settings are assigned
@@ -45,9 +45,9 @@ assert main_network and ovpn_client_network and ovpn_client_netmask,"%s , %s , %
 assert DIGEST_REALM and SECRET_KEY
 assert IMAGES
 
-import os
+import os,sys
 #NETWORKING_RESTART_CMD='/etc/init.d/networking restart' #12.04
-NETWORKING_RESTART_CMD='ifdown br0 && ifup br0' #14.04
+NETWORKING_RESTART_CMD='/sbin/ifdown br0 && /sbin/ifup br0' #14.04
 
 def getrole(role):
     for h in env.roledefs[role]:
@@ -169,7 +169,7 @@ def group_wipe(group,do=False):
             with settings(warn_only=True):
                 run("virsh destroy %s"%n)
             run("virsh undefine %s"%n)
-            run("rm /var/lib/libvirt/images/%s.img"%n)
+            run("rm /var/lib/libvirt/images/%s.%s"%(n,IMAGE_FORMAT))
 
 @parallel
 def group_start(group):
@@ -196,13 +196,13 @@ def check_hostnames(halt=False,rename=False):
             if halt: raise Exception('mismatch found ; aborting')
             if not rename: continue
             # make sure target image does not exist
-            assert not exists('/var/lib/libvirt/images/%s.img'%inthn),"image for %s already exists"%inthn
+            assert not exists('/var/lib/libvirt/images/%s.%s'%(inthn,IMAGE_FORMAT)),"image for %s already exists"%inthn
             # make sure target vhost with such a name does not exist
             assert inthn not in vhosts,"vhost %s already exists!"%inthn
             # come up with the rename commands to run for both vhost and image. reboot required
             cmds = ['virsh destroy %s'%n,
                     """virsh dumpxml %(old)s | sed 's/%(old)s/%(new)s/g' > /tmp/%(new)s.tmp.xml"""%{'old':n,'new':inthn},
-                    "mv /var/lib/libvirt/images/%s.img /var/lib/libvirt/images/%s.img"%(n,inthn),
+                    "mv /var/lib/libvirt/images/%s.%s /var/lib/libvirt/images/%s.%s"%(n,IMAGE_FORMAT,inthn,IMAGE_FORMAT),
                     "virsh undefine %s"%n,
                     "virsh define /tmp/%s.tmp.xml"%inthn,
                     "virsh start %s"%inthn]
@@ -494,7 +494,7 @@ def dhcp_move(src_host, dest_host, mac_addr, image_name, setup=False):
         assert len(src_ip_lines) == 1, "cannot find %s in %s" % (mac_addr, srcfn)
 
 
-def undefine(node, target, del_image=True):
+def undefine(node, target, del_image=True,run_destroy=True):
     srcfn = os.path.join('dhcpd-confs', '%s.conf' % target)
     src_lines = []
     pattern = ' of ' + node + ' ['
@@ -509,8 +509,10 @@ def undefine(node, target, del_image=True):
         _, origin, _, mac, _ = parse_dhcp_line(src_lines[0])
         dhcp_move(target, origin, mac, node, setup=True)
     rt = run('virsh undefine %s' % node)
-    if del_image: run('rm -f /var/lib/libvirt/images/%(image_name)s.img'\
-                      % {'image_name': node})
+    if del_image: run('rm -f /var/lib/libvirt/images/%(image_name)s.%(image_format)s'\
+                      % {'image_name': node,'image_format':IMAGE_FORMAT})
+    if run_destroy:
+        destroy(node,target)
     return rt
 
 
@@ -538,15 +540,16 @@ def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False,cha
         with settings(host_string=src_host):
             get(os.path.join('/etc/libvirt/qemu', '%s.xml' % image_name),
                 local_path=xml_node_description)
-            #rsynccmd = 'rsync -e "ssh -F ssh_config" %(src_host)s:/var/lib/libvirt/images/%(image_name)s.img %(dest_host)s:/var/lib/libvirt/images/%(image_name)s.img' % 
+            #rsynccmd = 'rsync -e "ssh -F ssh_config" %(src_host)s:/var/lib/libvirt/images/%(image_name)s.%(image_format)s %(dest_host)s:/var/lib/libvirt/images/%(image_name)s.%(image_format)s' % 
 
             
-            rsynccmd = 'scp -3 -F ssh_config %(src_host)s:/var/lib/libvirt/images/%(image_name)s.img.gz %(dest_host)s:/var/lib/libvirt/images/%(image_name)s.img.gz' % \
+            rsynccmd = 'scp -3 -F ssh_config %(src_host)s:/var/lib/libvirt/images/%(image_name)s.%(image_format)s.gz %(dest_host)s:/var/lib/libvirt/images/%(image_name)s.%(image_format)s.gz' % \
                 {'image_name': image_name,
+                 'image_format':IMAGE_FORMAT,
                  'dest_host': dest_host,
                  'src_host':src_host}
             if not nocopy:
-                pigzsrcname = '/var/lib/libvirt/images/%s.img'%image_name
+                pigzsrcname = '/var/lib/libvirt/images/%s.%s'%(image_name,IMAGE_FORMAT)
                 pigzdstname = pigzsrcname+'.gz'
                 if exists(pigzdstname) and not exists(pigzsrcname):
                     print('skipping pigz - compressed file exists without source file.')
@@ -563,7 +566,7 @@ def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False,cha
 
                 start = time.time()
                 with settings(host_string=dest_host):
-                    run('pigz -d /var/lib/libvirt/images/%s.img.gz'%image_name)
+                    run('pigz -d /var/lib/libvirt/images/%s.%s.gz'%(image_name,IMAGE_FORMAT))
                 end = time.time()
                 print('pigz -d took',(end - start),'seconds')
 
@@ -580,7 +583,7 @@ def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False,cha
                 run(cmd)
         with settings(host_string=src_host):
             run('virsh undefine %s' % image_name)
-            if not nocopy: run('rm /var/lib/libvirt/images/%(image_name)s.img.gz' % {'image_name': image_name})
+            if not nocopy: run('rm /var/lib/libvirt/images/%(image_name)s.%(image_format)s.gz' % {'image_name': image_name,'image_format':IMAGE_FORMAT})
     finally:
         if os.path.exists(xml_node_description):
             os.unlink(xml_node_description)
@@ -671,7 +674,7 @@ def create_node(node_name,
         tplfn = os.path.join('/var/lib/libvirt/images',template_name)
     else:
         tplfn = None
-    nodefn = os.path.join('/var/lib/libvirt/images','%s.img'%node_name)
+    nodefn = os.path.join('/var/lib/libvirt/images','%s.%s'%(node_name,IMAGE_FORMAT))
     if tplfn:
         assert fabric.contrib.files.exists(tplfn),"%s does not exist"%tplfn
     assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
@@ -953,9 +956,10 @@ auto eth0:%(cnt)s
     interfacestmp = '/tmp/interfaces-%s'%node_name
     upload_template('node-confs/interfaces',interfacestmp,varss)
     execute(run,'scp -o "StrictHostkeyChecking no" %s %s:/etc/network/interfaces'%(interfacestmp,ourhost['virt_ip']),host=ourhost['host'])
-    with settings(warn_only=True):
-        execute(run,\
-                ('ssh -o "StrictHostkeyChecking no" %(virt_ip)s '%ourhost)+NETWORKING_RESTART_CMD,host=ourhost['host'])
+    # with settings(warn_only=True):
+    #     execute(run,\
+    #             ('ssh -o "StrictHostkeyChecking no" %(virt_ip)s '%ourhost)+NETWORKING_RESTART_CMD,host=ourhost['host'])
+    print('SKIPPING NETWORK RESTART ON VIRT %s'%ourhost['host'],file=sys.stderr)
 
     #2. set up a correct hostname
 
@@ -1309,22 +1313,23 @@ def del_dns(domain):
 #         run('initctl start restapi')
 
 def enlarge_lvm(target, new_size='50G'):
-    def wait_for(cmd):
+    def wait_for(cmd,wait_cycles=30):
         puts('waiting for guest for %s...'%cmd)
         cycles = 0
         while not run(cmd, quiet=True).succeeded:
-            if cycles > 30:
+            if cycles > wait_cycles:
                 abort('failed to startup %s' % target)
             sleep(1)
             cycles += 1
 
-    guests = _lst(al=True, display=False)
+    guests = _lst(al=True, display=False,)
+
     if target not in guests:
         abort('guest machine "%s" not found in %s' % (target,list(guests.keys())))
-
+    
     target_ip = guests[target].get('virt_ip')
     print('target ip for %s is %s'%(target,target_ip))
-    image = '/var/lib/libvirt/images/%s.img' % target
+    image = '/var/lib/libvirt/images/%s.%s' % (target,IMAGE_FORMAT)
     if not exists(image):
         abort('missing image for "%s" guest' % target)
 
@@ -1346,7 +1351,7 @@ def enlarge_lvm(target, new_size='50G'):
     sudo('qemu-img resize %s +%s' % (image, new_size))
     sudo('virsh start %s' % target)
 
-    boot_check = 'nc -z %s 22' % target_ip
+    boot_check = 'nc -w 2 -z %s 22' % target_ip
     wait_for(boot_check)
 
     # resize disk partitions on target
@@ -1374,9 +1379,9 @@ def enlarge_lvm(target, new_size='50G'):
     wait_for(boot_check)
     with settings(shell=shellcmd):
         puts( 'about to pvresize')
-        run('pvresize /dev/vda5')
-        run('lvextend -l +100%FREE /dev/ubuntu/root')
-        run('resize2fs /dev/ubuntu/root')
+        run('pvresize %s'%PVRESIZE_BLOCKDEV)
+        run('lvextend -l +100%FREE '+LVEXTEND_BLOCKDEV)
+        run('resize2fs %s'%LVEXTEND_BLOCKDEV)
         puts('pvresize + lvextend + resize2fs are done.')
 
 
