@@ -10,11 +10,11 @@
    - [ ] default configs for servers. compatible with ubuntu 14.04,16.04,18.04  :: cp -r sample_conf/{server-confs,restapi-ssh,ssh_config,local_config.py} conf_repo/
 3. prepare a base image, /var/lib/libvirt/images/ubuntu-18.04-large.qcow2
    1. [ ] download ubuntu server iso :: sudo wget 'http://releases.ubuntu.com/18.04.1/ubuntu-18.04.1-live-server-amd64.iso' -O /var/lib/libvirt/images/ubuntu-18.04.iso
-   2. [ ] create a base image named "ubuntu-18.04-large" with virt-manager by installing the iso
-   3. [ ] update to latest vers :: sudo apt-get update && sudo apt-get dist-upgrade
-   4. [ ] put id_rsa-virt.pub into /root/.ssh/authorized_keys
-   5. [ ] sudo sed -i -E 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"/g' /etc/default/grub && sudo update-grub
-   6. [ ] sudo apt-get install ifupdown ; (echo 'audo eth0' ;echo 'inet eth0 dhcp' ) | sudo tee /etc/network/interfaces
+   2. [ ] install the iso into base image "ubuntu-18.04-large", make sure you use LVM in order to be able to resize/enlarge your root partition
+   4. [ ] update to latest vers :: sudo apt-get update && sudo apt-get dist-upgrade
+   5. [ ] put id_rsa-virt.pub into /root/.ssh/authorized_keys
+   6. [ ] sudo sed -i -E 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"/g' /etc/default/grub && sudo update-grub
+   7. [ ] sudo apt-get install ifupdown ; (echo 'audo eth0' ;echo 'inet eth0 dhcp' ) | sudo tee /etc/network/interfaces
 4. [ ] all hypervisors must have id_rsa-host.pub in their /root/.ssh/authorized_keys
 5. [ ] fab -R kvm install:1 #run the bare install, initially with apt-get update
 6. [ ] /var/lib/libvirt/images/ubuntu-18.04-large.qcow2 :: must have at least one virtual node image on each hypervisor

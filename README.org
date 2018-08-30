@@ -15,6 +15,8 @@ you have a rack of boxes, which you'd like to use as virtual machine hypervisors
 - small & easy to understand / modify
 - allows interaction with your rack both via the shell (fabric) as well as via a REST API.
 - (rather) simple & straightforward to set up. no state / clutter - just some config files.
+** quick install
+*** cli only base is detailed in [[file:INSTALL-base.org][INSTALL-base.org]]
 ** some howtos.
 *** doing maintenance on an image
 **** let's mount it
@@ -40,3 +42,4 @@ you have a rack of boxes, which you'd like to use as virtual machine hypervisors
 3. | host        | node_id | node_name                          | node_state |          node_mac | node_virt_ip |       public_ip | 
 4. cat /tmp/l.org  | /tmp/tsorg.py list | termsql -m tabs -0 -1 \
 'select host,sum(pubs) from (select distinct host,0 pubs from tbl union select host,count(distinct public_ip) pubs from tbl where public_ip is not null group by host) foo group by host order by pubs'
+
