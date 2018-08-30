@@ -31,6 +31,8 @@ gate = lambda x: '%s.%s.1' % (main_network, x and x or zero_offset-x)
 netrange = lambda x, y: '%s.%s.2 %s.%s.254' % (main_network, x and x or zero_offset-x, main_network, y)
 
 # default starting parameters for newly created virtual machines
+AUTO_STOP=True
+
 DEFAULT_RAM='524288'
 DEFAULT_VCPU=2
 
@@ -113,7 +115,7 @@ for ip in [ip for ip in ips if HOST_PREFIX in ip and len(HOST_PREFIX)<len(ip)]:
     try:
         i = int(ip.replace(HOST_PREFIX,''))
     except ValueError:
-        print('ip %s gives valuerr'%ip,file=sys.stderr)
+        print('ip %s gives valuerr'%ip) #,file=sys.stderr)
         continue
     HOST_IDX[ip]=i
     VLAN_GATEWAYS[ip]=gate(i)

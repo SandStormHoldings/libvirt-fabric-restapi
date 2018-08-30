@@ -312,7 +312,7 @@ def setup_dhcpd():
         base_vars = {
             'vlan_gw': vlan_gw,
             'dhcpd_domain_name':DHCPD_DOMAIN_NAME,
-            'dns_host':DNS_HOST,
+            'dns_host':(DNS_HOST and DNS_HOST+',' or ''),
             'classless_static_routes':classless_static_routes,
             'main_network': main_network,
             'vlan_range': vlan_range,
@@ -354,8 +354,17 @@ def install_ssh_config():
         if not fabric.contrib.files.exists('./.ssh/ssh_config'):
             fd = open('ssh_config','rb')
             rd = fd.read()
-            sshc = rd.replace(bytes(' %s'%SSH_HOST_KEYNAME,'utf-8'),bytes(' ~/.ssh/%s'%SSH_HOST_KEYNAME,'utf-8'))
-            sshc = sshc.replace(bytes(' %s'%SSH_VIRT_KEYNAME,'utf-8'),bytes(' ~/.ssh/%s'%SSH_VIRT_KEYNAME,'utf-8'))
+            if (sys.version_info >= (3, 0)):
+                cp='utf-8'
+                sshc = rd.replace(bytes(' %s'%SSH_HOST_KEYNAME,cp),bytes(' ~/.ssh/%s'%SSH_HOST_KEYNAME,cp))
+                sshc = sshc.replace(bytes(' %s'%SSH_VIRT_KEYNAME,cp),bytes(' ~/.ssh/%s'%SSH_VIRT_KEYNAME,cp))
+                
+            else:
+                cp=None
+                sshc = rd.replace(bytes(' %s'%SSH_HOST_KEYNAME),bytes(' ~/.ssh/%s'%SSH_HOST_KEYNAME))
+                sshc = sshc.replace(bytes(' %s'%SSH_VIRT_KEYNAME),bytes(' ~/.ssh/%s'%SSH_VIRT_KEYNAME))
+                
+            
             unc = io.BytesIO(sshc)
             put(unc,'.ssh/config')
 
@@ -998,11 +1007,12 @@ def host_reboot():
     run('reboot')
 
 
-def setup_openvpn(node_name):
-    ourhost = list_(al=True, display=False)[node_name]
-    print(ourhost)
-    if ourhost['host'] != env.host_string:
-        return
+def setup_openvpn(vlan_gw=None):
+    virt_ip=ovpn_internal_addr # FIXME: NEED TO VERIFY
+    # ourhost = list_(al=True, display=False)[node_name]
+    # print(ourhost)
+    # if ourhost['host'] != env.host_string:
+    #     return
 
     #hackish but fuckit.
     run('echo "nameserver 8.8.8.8" > /etc/resolv.conf')
@@ -1011,7 +1021,7 @@ def setup_openvpn(node_name):
     append('/etc/sysctl.conf','net.ipv4.ip_forward=1')
     
     #1. assign any floating ips that need be on this machine
-    my_floating_ips = [x for x in FLOATING_IPS if x[1]==ourhost['virt_ip']]
+    my_floating_ips = [x for x in FLOATING_IPS if x[1]==virt_ip]
 
     floating_ips_cont=''
     tpl ="""
@@ -1024,61 +1034,60 @@ auto eth0:%(cnt)s
         floating_ips_cont+=tpl%{'cnt':cnt,'floating_ip':fip[2]}
         cnt+=1
 
-    vlan_gw = VLAN_GATEWAYS[env.host_string]
+    if not vlan_gw: vlan_gw = VLAN_GATEWAYS[env.host_string]
     varss = {
-        'virt_ip': ourhost['virt_ip'],
+        'virt_ip': virt_ip,
         'floating_ips':floating_ips_cont,
         'gateway': vlan_gw}
     
-    interfacestmp = '/tmp/interfaces-%s'%node_name
+    #interfacestmp = '/tmp/interfaces-%s'%env.host_string
     upload_template('node-confs/static-interfaces',
-                    interfacestmp,
+                    '/etc/network/interfaces',
                     varss)
-    execute(run,'scp -o "StrictHostkeyChecking no" %s %s:/etc/network/interfaces'%(interfacestmp,ourhost['virt_ip']),host=ourhost['host'])
+    #execute(run,'scp -o "StrictHostkeyChecking no" %s %s:/etc/network/interfaces'%(interfacestmp,virt_ip),host=env.host_string)
+    run('apt-get install -y ifupdown')
     with settings(warn_only=True):
-        execute(run,\
-                ('ssh -o "StrictHostkeyChecking no" %(virt_ip)s '%ourhost)+NETWORKING_RESTART_CMD,host=ourhost['host'])
+        run(NETWORKING_RESTART_CMD)
 
-    with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % ourhost['virt_ip']):
-        run("apt-get -y --force-yes install openvpn sendemail")
-        with cd('/etc/openvpn'):
-            if not exists('easy-rsa'): run('mkdir easy-rsa')
-            sdirs = ['/usr/share/doc/openvpn/examples/easy-rsa/2.0/','/usr/share/doc/openvpn/examples/sample-keys/',None]
-            for dd in sdirs:
-                if exists(dd): break
-            assert dd,"could not find start dir for keys"
-            run('cp -R %s* easy-rsa/'%dd)
-            with cd('easy-rsa'):
-                if not exists('openssl.cnf') and exists('openssl-1.0.0.cnf'):
-                    run('ln -f -s openssl-1.0.0.cnf openssl.cnf')
-                #sudo('cp %s/data/openvpn/vars .' % dirname)
-                with prefix("source vars"):
-                    run('./clean-all')
-                    run('./build-dh')
-                    run('./pkitool --initca')
-                    run('./pkitool --server server')
-                with cd('keys'):
-                    run('openvpn --genkey --secret ta.key')
-                    run('cp ca.crt dh1024.pem ta.key server.key server.crt ../../')
-            append('/etc/openvpn/easy-rsa/keys/index.txt.attr','unique_subject = no')
+    run("apt-get -y install openvpn")
+    with cd('/etc/openvpn'):
+        if not exists('easy-rsa'): run('mkdir easy-rsa')
+        sdirs = ['/usr/share/doc/openvpn/examples/easy-rsa/2.0/','/usr/share/doc/openvpn/examples/sample-keys/',None]
+        for dd in sdirs:
+            if exists(dd): break
+        assert dd,"could not find start dir for keys"
+        run('cp -R %s* easy-rsa/'%dd)
+        with cd('easy-rsa'):
+            if not exists('openssl.cnf') and exists('openssl-1.0.0.cnf'):
+                run('ln -f -s openssl-1.0.0.cnf openssl.cnf')
+            #sudo('cp %s/data/openvpn/vars .' % dirname)
+            with prefix("source vars"):
+                run('./clean-all')
+                run('./build-dh')
+                run('./pkitool --initca')
+                run('./pkitool --server server')
+            with cd('keys'):
+                run('openvpn --genkey --secret ta.key')
+                run('cp ca.crt dh1024.pem ta.key server.key server.crt ../../')
+        append('/etc/openvpn/easy-rsa/keys/index.txt.attr','unique_subject = no')
 
-    my_floating_ips = [x for x in FLOATING_IPS if x[1]==ourhost['virt_ip']]
+    my_floating_ips = [x for x in FLOATING_IPS if x[1]==virt_ip]
     varss = {'bind_ip': my_floating_ips[0][2],
              'vlan_network':main_network+'.0.0',
              'ovpn_client_network':ovpn_client_network,
              'ovpn_client_netmask':ovpn_client_netmask,
              'vlan_netmask':'255.255.0.0'
              }
-    openvpn_conf_tmp = '/tmp/openvpn.conf-%s'%node_name
+    openvpn_conf_tmp = '/tmp/openvpn.conf-%s'%env.host_string
     upload_template('node-confs/openvpn_server.conf',openvpn_conf_tmp,varss)
-    run('scp -o "StrictHostkeyChecking no" %s %s:/etc/openvpn/server.conf' % (openvpn_conf_tmp,ourhost['virt_ip']))
+    run('scp -o "StrictHostkeyChecking no" %s %s:/etc/openvpn/server.conf' % (openvpn_conf_tmp,virt_ip))
 
     varss = {'server_ip': my_floating_ips[0][2]}
-    openvpn_client_conf_tmp = '/tmp/openvpn_client.conf-%s'%node_name
+    openvpn_client_conf_tmp = '/tmp/openvpn_client.conf-%s'%env.host_string
     upload_template('node-confs/openvpn_client.conf',openvpn_conf_tmp,varss)
-    run('scp -o "StrictHostkeyChecking no" %s %s:/etc/openvpn/client.example' % (openvpn_conf_tmp,ourhost['virt_ip']))
+    run('scp -o "StrictHostkeyChecking no" %s %s:/etc/openvpn/client.example' % (openvpn_conf_tmp,virt_ip))
 
-    with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % ourhost['virt_ip']):
+    with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % virt_ip):
         run('service openvpn restart')
 
 def openvpn_status():
@@ -1246,7 +1255,7 @@ def client_openvpn_exec(client_name,inlined,email):
 def setup_dns():
     with shell_env(DEBIAN_FRONTEND='noninteractive', DEBCONF_TERSE='yes',
                    DEBIAN_PRIORITY='critical'):
-        sudo("apt-get -qqyu --force-yes install dnsmasq")
+        sudo("apt-get -qqyu install dnsmasq-base")
     servers = '/etc/dnsmasq.d/servers'
     if not exists(servers):
         sudo('touch %s' % servers)

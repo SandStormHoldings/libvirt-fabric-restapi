@@ -13,8 +13,8 @@
    2. [ ] install the iso into base image "ubuntu-18.04-large", make sure you use LVM in order to be able to resize/enlarge your root partition
    4. [ ] update to latest vers :: sudo apt-get update && sudo apt-get dist-upgrade
    5. [ ] put id_rsa-virt.pub into /root/.ssh/authorized_keys
-   6. [ ] sudo sed -i -E 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"/g' /etc/default/grub && sudo update-grub
-   7. [ ] sudo apt-get install ifupdown ; (echo 'audo eth0' ;echo 'inet eth0 dhcp' ) | sudo tee /etc/network/interfaces
+   6. [ ] old style network interfaces :: sudo sed -i -E 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"/g' /etc/default/grub && sudo update-grub
+   7. [ ] 18.04 requires ifupdown package :: sudo apt-get install ifupdown ; (echo 'audo eth0' ;echo 'inet eth0 dhcp' ) | sudo tee /etc/network/interfaces
 4. [ ] all hypervisors must have id_rsa-host.pub in their /root/.ssh/authorized_keys
 5. [ ] fab -R kvm install:1 #run the bare install, initially with apt-get update
 6. [ ] /var/lib/libvirt/images/ubuntu-18.04-large.qcow2 :: must have at least one virtual node image on each hypervisor
@@ -23,7 +23,7 @@
    2. fab -R kvm uptime
 8. some notes on minimum requirements for a base linux image
    1. [ ] /root/.ssh/authorized_keys to have id_rsa-virt.pub
-9. copy the base virtualization image over to all hosts
+9. spread the base virtualization image across all hosts
    1. cd /usr/local/bin && curl -L -o gdrive 'https://drive.google.com/uc?id=IMGID && chmod +x gdrive
    2. /usr/local/bin/gdrive #execute gdrive initially and follow the instructions to get the token
    3. from the kvm control: scp -r hyperv1:/root/.gdrive conf_repo/gdrive ,
