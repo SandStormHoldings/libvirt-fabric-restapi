@@ -2309,3 +2309,22 @@ def install_python(user):
                 print(green('"python %s" is already installed' % python_ver))
             run('sudo -i -u %s %s'%(user,pyenv+' global ' + python_ver))
             run('sudo -i -u %s %s'%(user,pyenv+' rehash'))
+
+# import any fabric modules - fabs/*/fabfile.py , and assign their methods as global methods in this context
+# this is a rough extension mechanism
+d = os.listdir('fabs')
+for f in d:
+    fn = os.path.join('fabs',f)    
+    if not os.path.isdir(fn): continue
+    mod = __import__('.'.join(['fabs',f,'fabfile']))
+    submod = getattr(getattr(mod,f),'fabfile')
+    for m in dir(submod):
+        if callable(getattr(submod,m)):
+            lname = '_'.join([f,m])
+            if m in globals():
+                #print(f,'.',m,'ALREADY SET')
+                continue
+            globals()[lname] = getattr(submod,m)
+
+    #claymore_configure = mod.MiningFab.fabfile.claymore_configure
+    #print(fn,os.path.isdir(fn))
