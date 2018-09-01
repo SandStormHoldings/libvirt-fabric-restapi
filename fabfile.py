@@ -2316,13 +2316,14 @@ d = os.listdir('fabs')
 for f in d:
     fn = os.path.join('fabs',f)    
     if not os.path.isdir(fn): continue
-    mod = __import__('.'.join(['fabs',f,'fabfile']))
+    if os.path.exists('/'.join(['fabs',f,'fabfile.py'])):
+        mod = __import__('.'.join(['fabs',f,'fabfile']))
     submod = getattr(getattr(mod,f),'fabfile')
     for m in dir(submod):
         if callable(getattr(submod,m)):
             lname = '_'.join([f,m])
-            if m in globals():
-                #print(f,'.',m,'ALREADY SET')
+            if lname in globals():
+                print(f,'.',m,'ALREADY SET')
                 continue
             globals()[lname] = getattr(submod,m)
 
