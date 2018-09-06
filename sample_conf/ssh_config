@@ -1,0 +1,9 @@
+Host hypervisor1
+     User root
+     HostName 127.0.0.1
+     IdentityFile id_rsa-host
+     IdentitiesOnly yes
+     
+Host 10.95.*.*
+     User root
+     IdentityFile id_rsa-virt
