@@ -121,7 +121,7 @@ def slp(request,seconds):
 def migrate_node(request,host,node):
     try:
         pre = pre_from_req(request)
-        assert pre.search(node),"no permissions to access %s for %s"%(node,getuser(req))
+        assert pre.search(node),"no permissions to access %s for %s"%(node,getuser(request))
 
         dst_host = host
         dst_node = node

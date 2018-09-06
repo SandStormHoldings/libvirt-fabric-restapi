@@ -1692,7 +1692,7 @@ def install_ipt(myipt=None):
         put('server-confs/host-rc.local','/etc/rc.local')
         run('chmod +x /etc/rc.local')
         run('/etc/rc.local')
-    
+
 # example: fab -R kvm install_snmpd:10.98.0.0/16
 def install_snmpd(network=snmpd_network):
     run('apt-get -y -q install snmpd')
@@ -1702,6 +1702,14 @@ def install_snmpd(network=snmpd_network):
     run('service snmpd restart')
     myipt = init_ipt()
     install_ipt(myipt)
+
+# example: fab -R kvm install_fail2ban:"10.98.0.0/16 10.97.0.0/16"
+def install_fail2ban(ignoreip=snmpd_network):
+    run('apt-get update && apt-get -y -q install fail2ban')
+    upload_template(filename='node-confs/fail2ban/jail.local',
+                    destination='/etc/fail2ban/jail.local',
+                    context={'ignoreip':ignoreip})
+    run('service fail2ban restart')
 
 # fab -R kvm authorized_keys_get
 def authorized_keys_get(tdir='authorized_keys',usehostname=False):
