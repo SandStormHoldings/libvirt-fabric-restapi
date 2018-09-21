@@ -29,7 +29,7 @@
         http://www.linux-kvm.org/page/Virtio/Block/Latency
         QEMU has two asynchronous I/O mechanisms: POSIX AIO emulation using a pool of worker threads and native Linux AIO. -->
       <driver name='qemu' type='%(imgfmt)s' io='native' cache='none' />
-      <source file='/var/lib/libvirt/images/%(image)s.%(imgfmt)s'/>
+      <source file='/var/lib/libvirt/images/%(image)s.%(imgsuf)s'/>
       <target dev='vda' bus='virtio'/>
       <address type='pci' domain='0x0000' bus='0x00' slot='0x04' function='0x0'/>
     </disk>

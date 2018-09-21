@@ -74,7 +74,8 @@ SSH_VIRT_KEYNAME='id_rsa-virt' # virtual node ssh key
 SSH_KEYNAMES=[SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME]
 
 # this is the default format for virtual disk templates from which we instantiate hosts. qcow2 can be used just as well
-IMAGE_FORMAT='qcow2'
+IMAGE_SUFFIX=IMAGE_FORMAT='qcow2'
+
 PVRESIZE_BLOCKDEV='/dev/vda3'
 LVEXTEND_BLOCKDEV='/dev/mapper/ubuntu--vg-ubuntu--lv'
 
