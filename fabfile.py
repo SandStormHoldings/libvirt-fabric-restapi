@@ -686,10 +686,13 @@ def create_node(node_name,
     nodefn = os.path.join('/var/lib/libvirt/images','%s.%s'%(node_name,IMAGE_SUFFIX))
     if tplfn:
         assert fabric.contrib.files.exists(tplfn),"%s does not exist"%tplfn
-    assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
+    if tplfn: assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
     ns = uuid.NAMESPACE_DNS
     print('about to create uuid for node with ns %s, node name %s' % (ns, node_name.encode('utf-8')))
-    uuidi = uuid.uuid5(namespace=ns, name=node_name.encode('utf-8'))
+    if (sys.version_info >= (3, 0)):
+        uuidi = uuid.uuid5(namespace=ns, name=node_name)
+    else:
+        uuidi = uuid.uuid5(namespace=ns, name=node_name.encode('utf-8'))
     print('new node uuid:',uuidi)
     variables = {
         'uuid':str(uuidi),
