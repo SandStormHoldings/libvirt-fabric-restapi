@@ -1257,18 +1257,24 @@ def client_openvpn_exec(client_name,inlined,email):
 
 
 def setup_dns():
+    assert DNS_HOST
     with shell_env(DEBIAN_FRONTEND='noninteractive', DEBCONF_TERSE='yes',
                    DEBIAN_PRIORITY='critical'):
         sudo("apt-get -qqyu install dnsmasq-base")
     servers = '/etc/dnsmasq.d/servers'
+    sudo('mkdir -p /etc/dnsmasq.d')
     if not exists(servers):
         sudo('touch %s' % servers)
     cfg = '/etc/openvpn/server.conf'
-    bind_ip = sudo("ifconfig tun0 | grep 'inet addr:' | cut -d: -f2| cut -d' ' -f1")
-    # delete all dns servers in openvpn config and set dnsmasq as new one
+    bind_ip = DNS_HOST
     sudo("sed -ri '/dhcp-option DNS/d' %s" % cfg)
     sudo("echo 'push \"dhcp-option DNS %s\"' >> %s" % (bind_ip, cfg))
     put('node-confs/dnsmasq.conf','/etc/dnsmasq.conf')
+    put('node-confs/dnsmasq.init','/etc/init.d/dnsmasq')
+    put('node-confs/dnsmasq.default','/etc/default/dnsmasq')
+    run('chmod +x /etc/init.d/dnsmasq')
+    #run('sudo groupadd -r dnsmasq')
+    run('useradd -r -g nogroup dnsmasq ||:')
     sudo("service dnsmasq restart")
     sudo("service openvpn restart")
 
