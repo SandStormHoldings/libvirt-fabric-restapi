@@ -34,10 +34,10 @@ import fabric.contrib.files
 from config import (HOSTS, VLAN_GATEWAYS, VLAN_RANGES, FLOATING_IPS,IPV6,DEFAULT_GATEWAY,HOST_GATEWAYS,
                     DEFAULT_RAM, DEFAULT_VCPU, OVPN_HOST, main_network, ovpn_client_network,ovpn_internal_addr,ssh_passwords,
                     ovpn_client_netmask, DIGEST_REALM, SECRET_KEY, IMAGES, LOWERED_PRIVILEGES, snmpd_network, OVPN_KEY_SENDER, JUMPHOST_EXTERNAL_IP, DEFAULT_SEARCH, DNS_HOST, OVPN_KEYDIR,FORWARDED_PORTS,
-                    SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT,ETH_ALIASES
+                    SSH_HOST_KEYNAME,SSH_VIRT_KEYNAME,SSH_KEYNAMES,IMAGE_FORMAT,IMAGE_SUFFIX,DHCPD_DOMAIN_NAME,HYPERVISOR_HOSTNAME_PREFIX, DRBD_RESOURCES,DRBD_SALT,ETH_ALIASES
 )
 
-from config import MAIL_LOGIN,MAIL_PASSWORD,MAIL_SERVER,MAIL_PORT
+from config import MAIL_LOGIN,MAIL_PASSWORD,MAIL_SERVER,MAIL_PORT,PVRESIZE_BLOCKDEV,LVEXTEND_BLOCKDEV
 env.passwords=ssh_passwords
 
 #make sure that key config settings are assigned
@@ -45,9 +45,9 @@ assert main_network and ovpn_client_network and ovpn_client_netmask,"%s , %s , %
 assert DIGEST_REALM and SECRET_KEY
 assert IMAGES
 
-import os
+import os,sys
 #NETWORKING_RESTART_CMD='/etc/init.d/networking restart' #12.04
-NETWORKING_RESTART_CMD='ifdown br0 && ifup br0' #14.04
+NETWORKING_RESTART_CMD='/sbin/ifdown br0 && /sbin/ifup br0' #14.04
 
 def getrole(role):
     for h in env.roledefs[role]:
@@ -169,7 +169,7 @@ def group_wipe(group,do=False):
             with settings(warn_only=True):
                 run("virsh destroy %s"%n)
             run("virsh undefine %s"%n)
-            run("rm /var/lib/libvirt/images/%s.img"%n)
+            run("rm /var/lib/libvirt/images/%s.%s"%(n,IMAGE_SUFFIX))
 
 @parallel
 def group_start(group):
@@ -196,13 +196,13 @@ def check_hostnames(halt=False,rename=False):
             if halt: raise Exception('mismatch found ; aborting')
             if not rename: continue
             # make sure target image does not exist
-            assert not exists('/var/lib/libvirt/images/%s.img'%inthn),"image for %s already exists"%inthn
+            assert not exists('/var/lib/libvirt/images/%s.%s'%(inthn,IMAGE_SUFFIX)),"image for %s already exists"%inthn
             # make sure target vhost with such a name does not exist
             assert inthn not in vhosts,"vhost %s already exists!"%inthn
             # come up with the rename commands to run for both vhost and image. reboot required
             cmds = ['virsh destroy %s'%n,
                     """virsh dumpxml %(old)s | sed 's/%(old)s/%(new)s/g' > /tmp/%(new)s.tmp.xml"""%{'old':n,'new':inthn},
-                    "mv /var/lib/libvirt/images/%s.img /var/lib/libvirt/images/%s.img"%(n,inthn),
+                    "mv /var/lib/libvirt/images/%s.%s /var/lib/libvirt/images/%s.%s"%(n,IMAGE_SUFFIX,inthn,IMAGE_SUFFIX),
                     "virsh undefine %s"%n,
                     "virsh define /tmp/%s.tmp.xml"%inthn,
                     "virsh start %s"%inthn]
@@ -312,7 +312,7 @@ def setup_dhcpd():
         base_vars = {
             'vlan_gw': vlan_gw,
             'dhcpd_domain_name':DHCPD_DOMAIN_NAME,
-            'dns_host':DNS_HOST,
+            'dns_host':(DNS_HOST and DNS_HOST+',' or ''),
             'classless_static_routes':classless_static_routes,
             'main_network': main_network,
             'vlan_range': vlan_range,
@@ -321,7 +321,7 @@ def setup_dhcpd():
 
 
     with cd('/etc/dhcp/'):
-        put(source_tpl,'dhcpd.conf.install',base_vars)
+        upload_template(source_tpl,'dhcpd.conf.install',base_vars)
         with settings(warn_only=True):
             if run('diff /etc/dhcp/dhcpd.conf.install /etc/dhcp/dhcpd.conf'):
                 run('cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.backup')
@@ -352,7 +352,19 @@ def put_ssh_privkey(kfn,force_put=False,rkfnn=None):
 def install_ssh_config():
     if not env.host_string in LOWERED_PRIVILEGES:
         if not fabric.contrib.files.exists('./.ssh/ssh_config'):
-            sshc = open('ssh_config','r').read().replace(' %s'%SSH_HOST_KEYNAME,' ~/.ssh/%s'%SSH_HOST_KEYNAME).replace(' %s'%SSH_VIRT_KEYNAME,' ~/.ssh/%s'%SSH_VIRT_KEYNAME)
+            fd = open('ssh_config','rb')
+            rd = fd.read()
+            if (sys.version_info >= (3, 0)):
+                cp='utf-8'
+                sshc = rd.replace(bytes(' %s'%SSH_HOST_KEYNAME,cp),bytes(' ~/.ssh/%s'%SSH_HOST_KEYNAME,cp))
+                sshc = sshc.replace(bytes(' %s'%SSH_VIRT_KEYNAME,cp),bytes(' ~/.ssh/%s'%SSH_VIRT_KEYNAME,cp))
+                
+            else:
+                cp=None
+                sshc = rd.replace(bytes(' %s'%SSH_HOST_KEYNAME),bytes(' ~/.ssh/%s'%SSH_HOST_KEYNAME))
+                sshc = sshc.replace(bytes(' %s'%SSH_VIRT_KEYNAME),bytes(' ~/.ssh/%s'%SSH_VIRT_KEYNAME))
+                
+            
             unc = io.BytesIO(sshc)
             put(unc,'.ssh/config')
 
@@ -364,7 +376,8 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
     if apt_update or not fabric.contrib.files.exists('/var/cache/apt/pkgcache.bin'): run('sudo apt-get -q update')
     #install kvm
     run('sudo apt-get -q -y install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils isc-dhcp-server zile pigz tcpdump pv sendemail sysstat htop iftop nload xmlstarlet ncdu mosh')
-    run('sudo adduser `id -un` libvirtd')
+    install_xsltproc()    
+    run('sudo adduser `id -un` libvirt')
     run("echo '%s' > /etc/hostname"%env.host_string)
     run ("hostname %s"%env.host_string)
     #download an image
@@ -383,7 +396,7 @@ def install(apt_update=False,snmpd_network=snmpd_network,stop_before_network=Fal
     if network: setup_network(snmpd_network,runbraddcmd=runbraddcmd)
     setup_port_forwarding()
     if dhcpd: setup_dhcpd()
-    install_xsltproc()
+
 
     #this works for a host machine:
     #ip addr add 10.0.1.2 dev br0
@@ -490,7 +503,7 @@ def dhcp_move(src_host, dest_host, mac_addr, image_name, setup=False):
         assert len(src_ip_lines) == 1, "cannot find %s in %s" % (mac_addr, srcfn)
 
 
-def undefine(node, target, del_image=True):
+def undefine(node, target, del_image=True,run_destroy=True):
     srcfn = os.path.join('dhcpd-confs', '%s.conf' % target)
     src_lines = []
     pattern = ' of ' + node + ' ['
@@ -505,8 +518,10 @@ def undefine(node, target, del_image=True):
         _, origin, _, mac, _ = parse_dhcp_line(src_lines[0])
         dhcp_move(target, origin, mac, node, setup=True)
     rt = run('virsh undefine %s' % node)
-    if del_image: run('rm -f /var/lib/libvirt/images/%(image_name)s.img'\
-                      % {'image_name': node})
+    if del_image: run('rm -f /var/lib/libvirt/images/%(image_name)s.%(image_format)s'\
+                      % {'image_name': node,'image_format':IMAGE_SUFFIX})
+    if run_destroy:
+        destroy(node,target)
     return rt
 
 
@@ -534,15 +549,16 @@ def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False,cha
         with settings(host_string=src_host):
             get(os.path.join('/etc/libvirt/qemu', '%s.xml' % image_name),
                 local_path=xml_node_description)
-            #rsynccmd = 'rsync -e "ssh -F ssh_config" %(src_host)s:/var/lib/libvirt/images/%(image_name)s.img %(dest_host)s:/var/lib/libvirt/images/%(image_name)s.img' % 
+            #rsynccmd = 'rsync -e "ssh -F ssh_config" %(src_host)s:/var/lib/libvirt/images/%(image_name)s.%(image_format)s %(dest_host)s:/var/lib/libvirt/images/%(image_name)s.%(image_format)s' % 
 
             
-            rsynccmd = 'scp -3 -F ssh_config %(src_host)s:/var/lib/libvirt/images/%(image_name)s.img.gz %(dest_host)s:/var/lib/libvirt/images/%(image_name)s.img.gz' % \
+            rsynccmd = 'scp -3 -F ssh_config %(src_host)s:/var/lib/libvirt/images/%(image_name)s.%(image_format)s.gz %(dest_host)s:/var/lib/libvirt/images/%(image_name)s.%(image_format)s.gz' % \
                 {'image_name': image_name,
+                 'image_format':IMAGE_SUFFIX,
                  'dest_host': dest_host,
                  'src_host':src_host}
             if not nocopy:
-                pigzsrcname = '/var/lib/libvirt/images/%s.img'%image_name
+                pigzsrcname = '/var/lib/libvirt/images/%s.%s'%(image_name,IMAGE_SUFFIX)
                 pigzdstname = pigzsrcname+'.gz'
                 if exists(pigzdstname) and not exists(pigzsrcname):
                     print('skipping pigz - compressed file exists without source file.')
@@ -559,7 +575,7 @@ def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False,cha
 
                 start = time.time()
                 with settings(host_string=dest_host):
-                    run('pigz -d /var/lib/libvirt/images/%s.img.gz'%image_name)
+                    run('pigz -d /var/lib/libvirt/images/%s.%s.gz'%(image_name,IMAGE_SUFFIX))
                 end = time.time()
                 print('pigz -d took',(end - start),'seconds')
 
@@ -576,7 +592,7 @@ def migrate(image_name, dest_host, src_host=None, mac_addr=None,nocopy=False,cha
                 run(cmd)
         with settings(host_string=src_host):
             run('virsh undefine %s' % image_name)
-            if not nocopy: run('rm /var/lib/libvirt/images/%(image_name)s.img.gz' % {'image_name': image_name})
+            if not nocopy: run('rm /var/lib/libvirt/images/%(image_name)s.%(image_format)s.gz' % {'image_name': image_name,'image_format':IMAGE_SUFFIX})
     finally:
         if os.path.exists(xml_node_description):
             os.unlink(xml_node_description)
@@ -667,13 +683,16 @@ def create_node(node_name,
         tplfn = os.path.join('/var/lib/libvirt/images',template_name)
     else:
         tplfn = None
-    nodefn = os.path.join('/var/lib/libvirt/images','%s.img'%node_name)
+    nodefn = os.path.join('/var/lib/libvirt/images','%s.%s'%(node_name,IMAGE_SUFFIX))
     if tplfn:
         assert fabric.contrib.files.exists(tplfn),"%s does not exist"%tplfn
-    assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
+    if tplfn: assert not fabric.contrib.files.exists(nodefn),"%s exists"%nodefn
     ns = uuid.NAMESPACE_DNS
     print('about to create uuid for node with ns %s, node name %s' % (ns, node_name.encode('utf-8')))
-    uuidi = uuid.uuid5(namespace=ns, name=node_name.encode('utf-8'))#.encode('utf-8')
+    if (sys.version_info >= (3, 0)):
+        uuidi = uuid.uuid5(namespace=ns, name=node_name)
+    else:
+        uuidi = uuid.uuid5(namespace=ns, name=node_name.encode('utf-8'))
     print('new node uuid:',uuidi)
     variables = {
         'uuid':str(uuidi),
@@ -683,6 +702,7 @@ def create_node(node_name,
         'memory':memory,
         'vcpu': vcpu,
         'imgfmt':IMAGE_FORMAT,
+	'imgsuf':IMAGE_SUFFIX,
         'simulate':simulate,
         'brint':'br0',
     }
@@ -949,9 +969,10 @@ auto eth0:%(cnt)s
     interfacestmp = '/tmp/interfaces-%s'%node_name
     upload_template('node-confs/interfaces',interfacestmp,varss)
     execute(run,'scp -o "StrictHostkeyChecking no" %s %s:/etc/network/interfaces'%(interfacestmp,ourhost['virt_ip']),host=ourhost['host'])
-    with settings(warn_only=True):
-        execute(run,\
-                ('ssh -o "StrictHostkeyChecking no" %(virt_ip)s '%ourhost)+NETWORKING_RESTART_CMD,host=ourhost['host'])
+    # with settings(warn_only=True):
+    #     execute(run,\
+    #             ('ssh -o "StrictHostkeyChecking no" %(virt_ip)s '%ourhost)+NETWORKING_RESTART_CMD,host=ourhost['host'])
+    print('SKIPPING NETWORK RESTART ON VIRT %s'%ourhost['host'],file=sys.stderr)
 
     #2. set up a correct hostname
 
@@ -990,11 +1011,12 @@ def host_reboot():
     run('reboot')
 
 
-def setup_openvpn(node_name):
-    ourhost = list_(al=True, display=False)[node_name]
-    print(ourhost)
-    if ourhost['host'] != env.host_string:
-        return
+def setup_openvpn(vlan_gw=None):
+    virt_ip=ovpn_internal_addr # FIXME: NEED TO VERIFY
+    # ourhost = list_(al=True, display=False)[node_name]
+    # print(ourhost)
+    # if ourhost['host'] != env.host_string:
+    #     return
 
     #hackish but fuckit.
     run('echo "nameserver 8.8.8.8" > /etc/resolv.conf')
@@ -1003,7 +1025,7 @@ def setup_openvpn(node_name):
     append('/etc/sysctl.conf','net.ipv4.ip_forward=1')
     
     #1. assign any floating ips that need be on this machine
-    my_floating_ips = [x for x in FLOATING_IPS if x[1]==ourhost['virt_ip']]
+    my_floating_ips = [x for x in FLOATING_IPS if x[1]==virt_ip]
 
     floating_ips_cont=''
     tpl ="""
@@ -1016,61 +1038,60 @@ auto eth0:%(cnt)s
         floating_ips_cont+=tpl%{'cnt':cnt,'floating_ip':fip[2]}
         cnt+=1
 
-    vlan_gw = VLAN_GATEWAYS[env.host_string]
+    if not vlan_gw: vlan_gw = VLAN_GATEWAYS[env.host_string]
     varss = {
-        'virt_ip': ourhost['virt_ip'],
+        'virt_ip': virt_ip,
         'floating_ips':floating_ips_cont,
         'gateway': vlan_gw}
     
-    interfacestmp = '/tmp/interfaces-%s'%node_name
+    #interfacestmp = '/tmp/interfaces-%s'%env.host_string
     upload_template('node-confs/static-interfaces',
-                    interfacestmp,
+                    '/etc/network/interfaces',
                     varss)
-    execute(run,'scp -o "StrictHostkeyChecking no" %s %s:/etc/network/interfaces'%(interfacestmp,ourhost['virt_ip']),host=ourhost['host'])
+    #execute(run,'scp -o "StrictHostkeyChecking no" %s %s:/etc/network/interfaces'%(interfacestmp,virt_ip),host=env.host_string)
+    run('apt-get install -y ifupdown')
     with settings(warn_only=True):
-        execute(run,\
-                ('ssh -o "StrictHostkeyChecking no" %(virt_ip)s '%ourhost)+NETWORKING_RESTART_CMD,host=ourhost['host'])
+        run(NETWORKING_RESTART_CMD)
 
-    with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % ourhost['virt_ip']):
-        run("apt-get -y --force-yes install openvpn sendemail")
-        with cd('/etc/openvpn'):
-            if not exists('easy-rsa'): run('mkdir easy-rsa')
-            sdirs = ['/usr/share/doc/openvpn/examples/easy-rsa/2.0/','/usr/share/doc/openvpn/examples/sample-keys/',None]
-            for dd in sdirs:
-                if exists(dd): break
-            assert dd,"could not find start dir for keys"
-            run('cp -R %s* easy-rsa/'%dd)
-            with cd('easy-rsa'):
-                if not exists('openssl.cnf') and exists('openssl-1.0.0.cnf'):
-                    run('ln -f -s openssl-1.0.0.cnf openssl.cnf')
-                #sudo('cp %s/data/openvpn/vars .' % dirname)
-                with prefix("source vars"):
-                    run('./clean-all')
-                    run('./build-dh')
-                    run('./pkitool --initca')
-                    run('./pkitool --server server')
-                with cd('keys'):
-                    run('openvpn --genkey --secret ta.key')
-                    run('cp ca.crt dh1024.pem ta.key server.key server.crt ../../')
-            append('/etc/openvpn/easy-rsa/keys/index.txt.attr','unique_subject = no')
+    run("apt-get -y install openvpn")
+    with cd('/etc/openvpn'):
+        if not exists('easy-rsa'): run('mkdir easy-rsa')
+        sdirs = ['/usr/share/doc/openvpn/examples/easy-rsa/2.0/','/usr/share/doc/openvpn/examples/sample-keys/',None]
+        for dd in sdirs:
+            if exists(dd): break
+        assert dd,"could not find start dir for keys"
+        run('cp -R %s* easy-rsa/'%dd)
+        with cd('easy-rsa'):
+            if not exists('openssl.cnf') and exists('openssl-1.0.0.cnf'):
+                run('ln -f -s openssl-1.0.0.cnf openssl.cnf')
+            #sudo('cp %s/data/openvpn/vars .' % dirname)
+            with prefix("source vars"):
+                run('./clean-all')
+                run('./build-dh')
+                run('./pkitool --initca')
+                run('./pkitool --server server')
+            with cd('keys'):
+                run('openvpn --genkey --secret ta.key')
+                run('cp ca.crt dh1024.pem ta.key server.key server.crt ../../')
+        append('/etc/openvpn/easy-rsa/keys/index.txt.attr','unique_subject = no')
 
-    my_floating_ips = [x for x in FLOATING_IPS if x[1]==ourhost['virt_ip']]
+    my_floating_ips = [x for x in FLOATING_IPS if x[1]==virt_ip]
     varss = {'bind_ip': my_floating_ips[0][2],
              'vlan_network':main_network+'.0.0',
              'ovpn_client_network':ovpn_client_network,
              'ovpn_client_netmask':ovpn_client_netmask,
              'vlan_netmask':'255.255.0.0'
              }
-    openvpn_conf_tmp = '/tmp/openvpn.conf-%s'%node_name
+    openvpn_conf_tmp = '/tmp/openvpn.conf-%s'%env.host_string
     upload_template('node-confs/openvpn_server.conf',openvpn_conf_tmp,varss)
-    run('scp -o "StrictHostkeyChecking no" %s %s:/etc/openvpn/server.conf' % (openvpn_conf_tmp,ourhost['virt_ip']))
+    run('scp -o "StrictHostkeyChecking no" %s %s:/etc/openvpn/server.conf' % (openvpn_conf_tmp,virt_ip))
 
     varss = {'server_ip': my_floating_ips[0][2]}
-    openvpn_client_conf_tmp = '/tmp/openvpn_client.conf-%s'%node_name
+    openvpn_client_conf_tmp = '/tmp/openvpn_client.conf-%s'%env.host_string
     upload_template('node-confs/openvpn_client.conf',openvpn_conf_tmp,varss)
-    run('scp -o "StrictHostkeyChecking no" %s %s:/etc/openvpn/client.example' % (openvpn_conf_tmp,ourhost['virt_ip']))
+    run('scp -o "StrictHostkeyChecking no" %s %s:/etc/openvpn/client.example' % (openvpn_conf_tmp,virt_ip))
 
-    with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % ourhost['virt_ip']):
+    with settings(shell='ssh -t -o "StrictHostkeyChecking no" %s' % virt_ip):
         run('service openvpn restart')
 
 def openvpn_status():
@@ -1236,18 +1257,24 @@ def client_openvpn_exec(client_name,inlined,email):
 
 
 def setup_dns():
+    assert DNS_HOST
     with shell_env(DEBIAN_FRONTEND='noninteractive', DEBCONF_TERSE='yes',
                    DEBIAN_PRIORITY='critical'):
-        sudo("apt-get -qqyu --force-yes install dnsmasq")
+        sudo("apt-get -qqyu install dnsmasq-base")
     servers = '/etc/dnsmasq.d/servers'
+    sudo('mkdir -p /etc/dnsmasq.d')
     if not exists(servers):
         sudo('touch %s' % servers)
     cfg = '/etc/openvpn/server.conf'
-    bind_ip = sudo("ifconfig tun0 | grep 'inet addr:' | cut -d: -f2| cut -d' ' -f1")
-    # delete all dns servers in openvpn config and set dnsmasq as new one
+    bind_ip = DNS_HOST
     sudo("sed -ri '/dhcp-option DNS/d' %s" % cfg)
     sudo("echo 'push \"dhcp-option DNS %s\"' >> %s" % (bind_ip, cfg))
     put('node-confs/dnsmasq.conf','/etc/dnsmasq.conf')
+    put('node-confs/dnsmasq.init','/etc/init.d/dnsmasq')
+    put('node-confs/dnsmasq.default','/etc/default/dnsmasq')
+    run('chmod +x /etc/init.d/dnsmasq')
+    #run('sudo groupadd -r dnsmasq')
+    run('useradd -r -g nogroup dnsmasq ||:')
     sudo("service dnsmasq restart")
     sudo("service openvpn restart")
 
@@ -1305,22 +1332,23 @@ def del_dns(domain):
 #         run('initctl start restapi')
 
 def enlarge_lvm(target, new_size='50G'):
-    def wait_for(cmd):
+    def wait_for(cmd,wait_cycles=30):
         puts('waiting for guest for %s...'%cmd)
         cycles = 0
         while not run(cmd, quiet=True).succeeded:
-            if cycles > 30:
+            if cycles > wait_cycles:
                 abort('failed to startup %s' % target)
             sleep(1)
             cycles += 1
 
-    guests = _lst(al=True, display=False)
+    guests = _lst(al=True, display=False,)
+
     if target not in guests:
         abort('guest machine "%s" not found in %s' % (target,list(guests.keys())))
-
+    
     target_ip = guests[target].get('virt_ip')
     print('target ip for %s is %s'%(target,target_ip))
-    image = '/var/lib/libvirt/images/%s.img' % target
+    image = '/var/lib/libvirt/images/%s.%s' % (target,IMAGE_SUFFIX)
     if not exists(image):
         abort('missing image for "%s" guest' % target)
 
@@ -1342,7 +1370,7 @@ def enlarge_lvm(target, new_size='50G'):
     sudo('qemu-img resize %s +%s' % (image, new_size))
     sudo('virsh start %s' % target)
 
-    boot_check = 'nc -z %s 22' % target_ip
+    boot_check = 'nc -w 2 -z %s 22' % target_ip
     wait_for(boot_check)
 
     # resize disk partitions on target
@@ -1370,9 +1398,9 @@ def enlarge_lvm(target, new_size='50G'):
     wait_for(boot_check)
     with settings(shell=shellcmd):
         puts( 'about to pvresize')
-        run('pvresize /dev/vda5')
-        run('lvextend -l +100%FREE /dev/ubuntu/root')
-        run('resize2fs /dev/ubuntu/root')
+        run('pvresize %s'%PVRESIZE_BLOCKDEV)
+        run('lvextend -l +100%FREE '+LVEXTEND_BLOCKDEV)
+        run('resize2fs %s'%LVEXTEND_BLOCKDEV)
         puts('pvresize + lvextend + resize2fs are done.')
 
 
@@ -1692,7 +1720,7 @@ def install_ipt(myipt=None):
         put('server-confs/host-rc.local','/etc/rc.local')
         run('chmod +x /etc/rc.local')
         run('/etc/rc.local')
-    
+
 # example: fab -R kvm install_snmpd:10.98.0.0/16
 def install_snmpd(network=snmpd_network):
     run('apt-get -y -q install snmpd')
@@ -1702,6 +1730,14 @@ def install_snmpd(network=snmpd_network):
     run('service snmpd restart')
     myipt = init_ipt()
     install_ipt(myipt)
+
+# example: fab -R kvm install_fail2ban:"10.98.0.0/16 10.97.0.0/16"
+def install_fail2ban(ignoreip=snmpd_network):
+    run('apt-get update && apt-get -y -q install fail2ban')
+    upload_template(filename='node-confs/fail2ban/jail.local',
+                    destination='/etc/fail2ban/jail.local',
+                    context={'ignoreip':ignoreip})
+    run('service fail2ban restart')
 
 # fab -R kvm authorized_keys_get
 def authorized_keys_get(tdir='authorized_keys',usehostname=False):
@@ -2241,3 +2277,94 @@ def test_data_readrange(pth,ifr=0,ito=20,put_=True,seqlen=DEFAULT_SEQLEN):
         test_data_read(pth,c,False,seqlen)
         c+=1
 
+from fabric.colors import red, green, yellow
+def install_python(user):
+    tdir='~/.pyenv'
+    qtdir = tdir.replace('~','/home/%s'%user)
+    pyenv = os.path.join(tdir,'bin/pyenv')
+    qpyenv = os.path.join(qtdir,'bin/pyenv')
+    venvpth = os.path.join(tdir,'plugins/pyenv-virtualenv')
+    
+    with settings(warn_only=False, sudo_user=user):
+        pth = os.path.join(qtdir,'bin')+':$PATH'
+        with shell_env(HOME='/home/' + user,
+                       PATH=pth):
+            # Install pyenv
+            if not exists(qtdir):
+                sudo('git clone https://github.com/yyuu/pyenv.git %s'%tdir)
+            else:
+                print(green('"pyenv" is already installed'))
+
+            with settings(warn_only=True):
+                res= sudo('grep ".pyenv" ~/.bashrc > /dev/null')
+            if res.failed:
+                pyenv_root = 'PYENV_ROOT="$HOME\/.pyenv"'
+                path_str = 'PATH="$PYENV_ROOT\/bin:$PATH"'
+                sudo('echo -e "\n# pyenv" >> ~/.bashrc')
+                sudo('echo "export %s" >> ~/.bashrc')
+                sudo("sed -i -e 's/%s/" + pyenv_root + "/g' ~/.bashrc")
+                sudo('echo "export %s" >> ~/.bashrc')
+                sudo("sed -i -e 's/%s/" + path_str + "/g' ~/.bashrc")
+            else:
+                print(green('"pyenv PATH" is already written'))
+
+            with settings(warn_only=True):
+                res = sudo('grep "pyenv init" ~/.bashrc > /dev/null')
+            
+            if res.failed:
+                py_str = '"$(pyenv init -)"'
+                sudo('echo "eval %s" >> ~/.bashrc')
+                sudo("sed -i -e 's/%s/" + py_str + "/g' ~/.bashrc")
+            else:
+                print(green('"pyenv" init is already written'))
+
+            if not exists(venvpth):
+                sudo('git clone https://github.com/pyenv/pyenv-virtualenv.git %s'%os.path.join(tdir,'plugins/pyenv-virtualenv'))
+            else:
+                print(green('"pyenv-virtualenv" is already installed'))
+
+            with settings(warn_only=True):
+                res = sudo('grep "pyenv virtualenv-init" ~/.bashrc > /dev/null')
+                
+            if res.failed:
+                py_str = '"$(pyenv virtualenv-init -)"'
+                sudo('echo "eval %s" >> ~/.bashrc')
+                sudo("sed -i -e 's/%s/" + py_str + "/g' ~/.bashrc")
+            else:
+                print(green('"pyenv virtualenv-init already init"'))
+
+
+            # Install Python
+            cmd = "%s install -l | awk '{print $1}' | egrep --color=never '^3\.6\.[0-9.]+$' | tail -1"%pyenv
+            python_ver = run('sudo -u %s -i %s'%(user,cmd))
+            cmd = pyenv+' versions | grep --color=never "' + python_ver + '" > /dev/null'
+            with settings(warn_only=True):
+                res = run('sudo -i -u %s %s'%(user,cmd))
+            if res.failed:
+                #print('pyenv install %s # for the latest python ver'%python_ver)
+                run('apt-get install -q -y libssl-dev')
+                run('sudo -i -u %s %s install %s'%(user,pyenv,python_ver))
+            else:
+                print(green('"python %s" is already installed' % python_ver))
+            run('sudo -i -u %s %s'%(user,pyenv+' global ' + python_ver))
+            run('sudo -i -u %s %s'%(user,pyenv+' rehash'))
+
+# import any fabric modules - fabs/*/fabfile.py , and assign their methods as global methods in this context
+# this is a rough extension mechanism
+d = os.listdir('fabs')
+for f in d:
+    fn = os.path.join('fabs',f)    
+    if not os.path.isdir(fn): continue
+    if os.path.exists('/'.join(['fabs',f,'fabfile.py'])):
+        mod = __import__('.'.join(['fabs',f,'fabfile']))
+    submod = getattr(getattr(mod,f),'fabfile')
+    for m in dir(submod):
+        if callable(getattr(submod,m)):
+            lname = '_'.join([f,m])
+            if lname in globals():
+                print(f,'.',m,'ALREADY SET')
+                continue
+            globals()[lname] = getattr(submod,m)
+
+    #claymore_configure = mod.MiningFab.fabfile.claymore_configure
+    #print(fn,os.path.isdir(fn))

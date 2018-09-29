@@ -1,0 +1,37 @@
+# This file describes the network interfaces available on your system
+# and how to activate them. For more information, see interfaces(5).
+
+source /etc/network/interfaces.d/*
+
+# The loopback network interface
+auto lo
+iface lo inet loopback
+
+# The primary network interface
+auto enp5s0
+iface enp5s0 inet dhcp
+
+#iface enp5s0:1 inet static
+#address 10.0.1.3
+#netmask 255.255.255.0
+
+# new stuff!
+auto br0
+iface br0 inet dhcp
+      address %(main_ip)s
+      netmask 255.255.255.0
+      gateway %(gateway)s
+      bridge_ports enp5s0
+      bridge_fd 9
+      bridge_hello 2
+      bridge_maxage 12
+      bridge_stp off
+
+      %(extra)s
+
+      up ip addr add %(vlan_gw)s/16 dev br0
+      pre-up iptables -tnat -A POSTROUTING -o br0 -s %(main_network)s.0.0/16 ! -d %(main_network)s.0.0/16 -j MASQUERADE
+      pre-up iptables -A FORWARD -i br0 -d %(main_network)s.0.0/16 -m state --state RELATED,ESTABLISHED -j ACCEPT      
+      pre-up iptables -A FORWARD -i br0 -s %(main_network)s.0.0/16 ! -d %(main_network)s.0.0/16 -j ACCEPT
+      %(my_floating_ips)s
+      down ip addr del %(vlan_gw)s/16 dev br0
