@@ -1253,7 +1253,7 @@ def client_openvpn_exec(client_name,inlined,email):
                           'tgzfn': tgzfn,
                           'apnd':apnd,
                           'client':client_name}
-                run('sendemail -f %(sender)s -t %(email)s -m "is attached." -u "%(client)s openvpn key" -a %(tgzfn)s %(apnd)s -xu %(mail_login)s -xp %(mail_password)s -s %(mail_host)s:%(mail_port)s' % params)
+                run('sendemail -f %(sender)s -t %(email)s -m "is attached." -u "%(client)s openvpn key" -a %(tgzfn)s %(apnd)s -o tls=yes -xu %(mail_login)s -xp %(mail_password)s -s %(mail_host)s:%(mail_port)s' % params)
 
 
 def setup_dns():
